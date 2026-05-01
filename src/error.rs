@@ -35,6 +35,9 @@ pub enum Error {
 
     #[error("SKILL.md not found in {0}")]
     SkillMdMissing(String),
+
+    #[error("network error: {0}")]
+    Network(String),
 }
 
 /// Convenience alias.
