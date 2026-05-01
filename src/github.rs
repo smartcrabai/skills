@@ -152,23 +152,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_owner_repo() {
-        let s = parse_source("a/b").expect("parse");
+    fn parse_owner_repo() -> Result<()> {
+        let s = parse_source("a/b")?;
         assert_eq!(s.owner, "a");
         assert_eq!(s.repo, "b");
         assert!(s.sub_path.as_os_str().is_empty());
         assert!(s.ref_.is_none());
         assert_eq!(s.skill_name(), "b");
+        Ok(())
     }
 
     #[test]
-    fn parse_with_subpath_and_ref() {
-        let s = parse_source("o/r/skills/foo#main").expect("parse");
+    fn parse_with_subpath_and_ref() -> Result<()> {
+        let s = parse_source("o/r/skills/foo#main")?;
         assert_eq!(s.owner, "o");
         assert_eq!(s.repo, "r");
         assert_eq!(s.sub_path, PathBuf::from("skills/foo"));
         assert_eq!(s.ref_.as_deref(), Some("main"));
         assert_eq!(s.skill_name(), "foo");
+        Ok(())
     }
 
     #[test]
