@@ -139,44 +139,47 @@ fn io_from_walkdir(e: walkdir::Error) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error as StdError;
     use tempfile::tempdir;
 
+    type TestResult = std::result::Result<(), Box<dyn StdError>>;
+
     #[test]
-    fn copy_recursive_round_trip() {
-        let src = tempdir().expect("tmp src");
-        fs::create_dir_all(src.path().join("a")).expect("mkdir");
-        fs::write(src.path().join("a/file.txt"), b"hi").expect("write");
-        let dst = tempdir().expect("tmp dst");
+    fn copy_recursive_round_trip() -> TestResult {
+        let src = tempdir()?;
+        fs::create_dir_all(src.path().join("a"))?;
+        fs::write(src.path().join("a/file.txt"), b"hi")?;
+        let dst = tempdir()?;
         let target = dst.path().join("copy");
-        install_to_master(src.path(), &target).expect("install");
-        assert_eq!(fs::read(target.join("a/file.txt")).expect("read"), b"hi");
+        install_to_master(src.path(), &target)?;
+        assert_eq!(fs::read(target.join("a/file.txt"))?, b"hi");
+        Ok(())
     }
 
     #[test]
-    fn link_symlink_and_copy() {
-        let master_root = tempdir().expect("tmp");
+    fn link_symlink_and_copy() -> TestResult {
+        let master_root = tempdir()?;
         let master = master_root.path().join("foo");
-        fs::create_dir_all(&master).expect("mkdir");
-        fs::write(master.join("SKILL.md"), b"#").expect("write");
+        fs::create_dir_all(&master)?;
+        fs::write(master.join("SKILL.md"), b"#")?;
 
-        let agents_root = tempdir().expect("tmp");
+        let agents_root = tempdir()?;
         let a1 = agents_root.path().join("agent1");
         let a2 = agents_root.path().join("agent2");
-        link_into_agents(&master, &[a1.clone()], Method::Symlink).expect("symlink");
+        link_into_agents(&master, std::slice::from_ref(&a1), Method::Symlink)?;
         assert!(
-            fs::symlink_metadata(a1.join("foo"))
-                .expect("meta")
+            fs::symlink_metadata(a1.join("foo"))?
                 .file_type()
                 .is_symlink()
         );
 
-        link_into_agents(&master, &[a2.clone()], Method::Copy).expect("copy");
+        link_into_agents(&master, std::slice::from_ref(&a2), Method::Copy)?;
         assert!(a2.join("foo").is_dir());
         assert!(
-            !fs::symlink_metadata(a2.join("foo"))
-                .expect("meta")
+            !fs::symlink_metadata(a2.join("foo"))?
                 .file_type()
                 .is_symlink()
         );
+        Ok(())
     }
 }
