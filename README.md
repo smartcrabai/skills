@@ -22,21 +22,36 @@ skills add vercel-labs/skills/skills/find-skills -g --copy
 
 # Pick a specific ref
 skills add vercel-labs/skills/skills/find-skills#main -g -y
+
+# List, search, refresh, remove
+skills list -g
+skills find slides
+skills update -g
+skills remove find-skills -g -y
+
+# Scaffold a new skill in ./my-skill/SKILL.md
+skills init my-skill
 ```
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `skills add <repo>/<sub_path>` | Install a skill from a GitHub repo (this PR) |
-| `skills list` | List installed skills (Phase B) |
-| `skills find [query]` | Search for skills (Phase B) |
-| `skills remove [skills]` | Uninstall skill(s) (Phase B) |
-| `skills update [skills]` | Refresh skill(s) from upstream (Phase B) |
-| `skills init [name]` | Scaffold a new `SKILL.md` (Phase B) |
-| `skills config <key> <op> [value]` | Read/modify config (Phase B) |
+| `skills add <source>` | Install a skill from a GitHub repo (`owner/repo[/sub_path][#ref]`) |
+| `skills list` | List installed skills as a table or JSON |
+| `skills find [query]` | Search the remote registry, falling back to the local one |
+| `skills remove [skills...]` | Uninstall one or more skills |
+| `skills update [skills...]` | Re-fetch and relink skills from upstream |
+| `skills init [name]` | Scaffold a new `SKILL.md` template |
+| `skills config <key> <op> [value...]` | Read or modify `config.json` |
 
-### `add` flags
+### `add`
+
+Installs a skill into the master store and wires it into one or more agents' skill directories.
+
+```bash
+skills add <source> [-g|--global | -p|--project] [--copy] [-a <agent>]... [-y]
+```
 
 | Flag | Description |
 |---|---|
@@ -45,6 +60,67 @@ skills add vercel-labs/skills/skills/find-skills#main -g -y
 | `--copy` | Deep-copy into agent dirs instead of symlinks |
 | `-a`, `--agent <name>` | Specific agent to wire up (repeatable) |
 | `-y`, `--yes` | Skip interactive prompts |
+
+`<source>` accepts `owner/repo`, `owner/repo/sub_path`, or either form suffixed with `#ref` (branch, tag, or commit). Without `-g`/`-p` on a TTY, `add` prompts for the scope; in non-TTY mode one of the two flags is required. Without `-a` it falls back to `default_agents` from `config.json`.
+
+### `list`
+
+```bash
+skills list [-g|--global | -p|--project] [--json]
+```
+
+By default lists everything in the registry. `-p` filters to skills installed for the current working directory. `--json` emits the full registry rows.
+
+### `find`
+
+```bash
+skills find [query] [--json]
+```
+
+Calls the remote search API (default `https://skills.sh/api/search`, overridable via `SKILLS_SEARCH_API`) and renders a table. If the API is unreachable, falls back to a case-insensitive grep over the local registry. On a TTY, omitting `[query]` opens an interactive prompt.
+
+### `remove`
+
+```bash
+skills remove [skills...] [-g|--global | -p|--project] [-y]
+```
+
+Without names, opens an interactive multiselect of installed skills (TTY only). With names, resolves each against the chosen scope, prompts for confirmation, then unlinks agent dirs, deletes the master copy, and removes the registry entry. `-g` / `-p` narrow the search; if a name is ambiguous, project (matching cwd) wins, then global.
+
+### `update`
+
+```bash
+skills update [skills...] [-g|--global | -p|--project] [-y]
+```
+
+Re-fetches each target from its recorded source/ref. If the upstream commit is unchanged it prints `up-to-date`; otherwise it overwrites the master copy and re-links agent dirs (preserving the original `Method`). For global skills, any newly-added entry in `default_agents` is also wired up.
+
+### `init`
+
+```bash
+skills init [name]
+```
+
+Writes a `SKILL.md` template with frontmatter and section scaffolding. With a name, creates `./<name>/SKILL.md`; without one, uses the basename of the cwd and writes `./SKILL.md`. Refuses to overwrite an existing file.
+
+### `config`
+
+```bash
+skills config <key> <op> [value...]
+```
+
+| Key + op | Effect |
+|---|---|
+| `show` | Pretty-print the entire config as JSON |
+| `default_agents list` | Print each default agent name |
+| `default_agents add <agent>` | Append an agent (must already be defined under `agents`) |
+| `default_agents remove <agent>` | Drop an agent from the defaults |
+| `default_agents set <a,b,c>` or `set <a> <b> <c>` | Replace the default list |
+| `store.global set <path>` | Override the global store path |
+| `store.project set <path>` | Override the per-project store path |
+| `agents list` | Render the agent table |
+| `agents add <name> <global_dir> <project_dir>` | Register a new agent |
+| `agents remove <name>` | Unregister; cascades to `default_agents` if present |
 
 ## Configuration
 
@@ -78,6 +154,14 @@ $XDG_DATA_HOME/smartcrab-skills/
 ```
 
 Path expansion supports `~`, `$VAR`, and `${VAR:-default}`.
+
+## Environment variables
+
+| Variable | Effect |
+|---|---|
+| `XDG_CONFIG_HOME` | Where `config.json` and `skills.json` live (default: `~/.config/smartcrab-skills`) |
+| `XDG_DATA_HOME` | Where the master store lives (default: `~/.local/share/smartcrab-skills/store`) |
+| `SKILLS_SEARCH_API` | Override the `find` endpoint (default: `https://skills.sh/api/search`) |
 
 ## License
 
