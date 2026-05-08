@@ -6,13 +6,21 @@ use serde::{Deserialize, Serialize};
 use crate::agents::{Agent, default_agents};
 use crate::error::{Error, Result};
 
+const DEFAULT_CREATOR: &str = "claude-code";
+
 /// Top-level configuration persisted to `config.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub schema: u32,
     pub store: StoreConfig,
+    #[serde(default = "default_creator_str")]
+    pub default_creator: String,
     pub default_agents: Vec<String>,
     pub agents: Vec<Agent>,
+}
+
+fn default_creator_str() -> String {
+    DEFAULT_CREATOR.to_string()
 }
 
 /// Where master skill data lives on disk (one for global, one for project).
@@ -30,7 +38,8 @@ impl Default for Config {
                 global: "${XDG_DATA_HOME:-~/.local/share}/smartcrab-skills/store".to_string(),
                 project: ".smartcrab-skills/store".to_string(),
             },
-            default_agents: vec!["claude-code".to_string()],
+            default_creator: DEFAULT_CREATOR.to_string(),
+            default_agents: vec![DEFAULT_CREATOR.to_string()],
             agents: default_agents(),
         }
     }
@@ -184,6 +193,45 @@ mod tests {
         let cfg = Config::default();
         assert!(cfg.agent("claude-code").is_some());
         assert_eq!(cfg.default_agents, vec!["claude-code".to_string()]);
+    }
+
+    #[test]
+    fn default_creator_is_claude_code() {
+        // Given: the default config
+        let cfg = Config::default();
+        // Then: default_creator is "claude-code"
+        assert_eq!(cfg.default_creator, "claude-code");
+    }
+
+    #[test]
+    fn config_deserializes_without_default_creator_field() -> anyhow::Result<()> {
+        // Given: JSON without the default_creator field (backward compat)
+        let json = r#"{
+            "schema": 1,
+            "store": { "global": "/tmp/store", "project": ".store" },
+            "default_agents": ["claude-code"],
+            "agents": []
+        }"#;
+        // When: deserialized
+        let cfg: Config = serde_json::from_str(json)?;
+        // Then: default_creator falls back to "claude-code"
+        assert_eq!(cfg.default_creator, "claude-code");
+        Ok(())
+    }
+
+    #[test]
+    fn config_round_trips_default_creator() -> anyhow::Result<()> {
+        // Given: a config with explicit default_creator
+        let cfg = Config {
+            default_creator: "custom-creator".to_string(),
+            ..Config::default()
+        };
+        // When: serialized then deserialized
+        let json = serde_json::to_string(&cfg)?;
+        let restored: Config = serde_json::from_str(&json)?;
+        // Then: default_creator is preserved
+        assert_eq!(restored.default_creator, "custom-creator");
+        Ok(())
     }
 
     #[test]

@@ -3,7 +3,7 @@ use tabled::settings::Style;
 
 use crate::cli::ListArgs;
 use crate::error::Result;
-use crate::registry::{InstalledSkill, Method, Registry, Scope};
+use crate::registry::{InstalledSkill, Registry, Scope};
 
 /// Implements the `list` flow: load registry, filter by scope, render JSON or table.
 ///
@@ -54,7 +54,7 @@ fn render_table(skills: &[&InstalledSkill]) -> String {
         builder.push_record([
             s.name.clone(),
             scope_str(s.scope).to_string(),
-            method_str(s.method).to_string(),
+            s.method.to_string(),
             s.source.clone(),
             s.agents.join(","),
         ]);
@@ -71,13 +71,6 @@ fn scope_str(scope: Scope) -> &'static str {
     }
 }
 
-fn method_str(method: Method) -> &'static str {
-    match method {
-        Method::Symlink => "symlink",
-        Method::Copy => "copy",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -85,6 +78,7 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
+    use crate::registry::Method;
 
     fn skill(name: &str, scope: Scope) -> InstalledSkill {
         let now = Utc::now();
@@ -119,7 +113,7 @@ mod tests {
     fn scope_and_method_strings() {
         assert_eq!(scope_str(Scope::Global), "global");
         assert_eq!(scope_str(Scope::Project), "project");
-        assert_eq!(method_str(Method::Symlink), "symlink");
-        assert_eq!(method_str(Method::Copy), "copy");
+        assert_eq!(Method::Symlink.to_string(), "symlink");
+        assert_eq!(Method::Copy.to_string(), "copy");
     }
 }

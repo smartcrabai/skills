@@ -20,13 +20,13 @@ pub async fn run(args: AddArgs) -> Result<()> {
     let source = parse_source(&args.source)?;
     let cfg = Config::load()?;
 
-    let scope = resolve_scope(&args)?;
+    let scope = resolve_scope(args.global, args.project, args.yes)?;
     let project_root = match scope {
         Scope::Project => Some(std::env::current_dir()?),
         Scope::Global => None,
     };
 
-    let agents = resolve_agents(&args, &cfg)?;
+    let agents = resolve_agents(&args.agents, args.yes, &cfg)?;
     if agents.is_empty() {
         return Err(Error::ConfigError("no agents selected".to_string()));
     }
@@ -84,33 +84,33 @@ pub async fn run(args: AddArgs) -> Result<()> {
     Ok(())
 }
 
-fn resolve_scope(args: &AddArgs) -> Result<Scope> {
-    match (args.global, args.project) {
+pub(crate) fn resolve_scope(global: bool, project: bool, yes: bool) -> Result<Scope> {
+    match (global, project) {
         (true, true) => Err(Error::InvalidScope(
             "--global and --project are mutually exclusive".to_string(),
         )),
         (true, false) => Ok(Scope::Global),
         (false, true) => Ok(Scope::Project),
-        (false, false) if ui::is_tty() && !args.yes => ui::select_scope(Some(Scope::Global)),
+        (false, false) if ui::is_tty() && !yes => ui::select_scope(Some(Scope::Global)),
         (false, false) => Err(Error::InvalidScope(
             "specify --global or --project (no TTY for interactive prompt)".to_string(),
         )),
     }
 }
 
-fn resolve_agents(args: &AddArgs, cfg: &Config) -> Result<Vec<String>> {
-    if !args.agents.is_empty() {
-        return Ok(args.agents.clone());
+pub(crate) fn resolve_agents(agents: &[String], yes: bool, cfg: &Config) -> Result<Vec<String>> {
+    if !agents.is_empty() {
+        return Ok(agents.to_vec());
     }
     let defaults = cfg.default_agent_names();
-    if args.yes || !ui::is_tty() {
+    if yes || !ui::is_tty() {
         return Ok(defaults);
     }
     let all_names: Vec<String> = cfg.agents.iter().map(|a| a.name.clone()).collect();
     ui::multiselect_agents(&all_names, &defaults)
 }
 
-fn validate_agents(cfg: &Config, requested: &[String]) -> Result<()> {
+pub(crate) fn validate_agents(cfg: &Config, requested: &[String]) -> Result<()> {
     for name in requested {
         if cfg.agent(name).is_none() {
             return Err(Error::ConfigError(format!("unknown agent: {name}")));
@@ -119,7 +119,7 @@ fn validate_agents(cfg: &Config, requested: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn master_dir_for(cfg: &Config, scope: Scope, project_root: Option<&Path>) -> PathBuf {
+pub(crate) fn master_dir_for(cfg: &Config, scope: Scope, project_root: Option<&Path>) -> PathBuf {
     let base = match scope {
         Scope::Global => cfg.expand_global_store(),
         Scope::Project => cfg.expand_project_store(project_root.unwrap_or_else(|| Path::new("."))),
@@ -131,7 +131,7 @@ fn master_dir_for(cfg: &Config, scope: Scope, project_root: Option<&Path>) -> Pa
     base.join(segment)
 }
 
-fn resolve_agent_dirs(
+pub(crate) fn resolve_agent_dirs(
     cfg: &Config,
     agents: &[String],
     scope: Scope,
@@ -166,17 +166,13 @@ fn print_summary(
     agent_dirs: &[PathBuf],
     method: Method,
 ) {
-    let method_str = match method {
-        Method::Symlink => "symlink",
-        Method::Copy => "copy",
-    };
     println!("Installed skill: {skill_name}");
     println!("  source : {}", source.canonical());
     if let Some(r) = &source.ref_ {
         println!("  ref    : {r}");
     }
     println!("  master : {}", master_path.display());
-    println!("  method : {method_str}");
+    println!("  method : {method}");
     println!("  agents :");
     for (name, dir) in agents.iter().zip(agent_dirs.iter()) {
         println!("    - {name} -> {}", dir.join(skill_name).display());

@@ -15,6 +15,8 @@ pub struct Cli {
 pub enum Command {
     /// Install a skill from a GitHub source.
     Add(AddArgs),
+    /// Generate a SKILL.md from a description using an AI creator agent, then install.
+    Create(CreateArgs),
     /// List installed skills.
     List(ListArgs),
     /// Search for skills (remote API + local registry fallback).
@@ -105,6 +107,38 @@ pub struct InitArgs {
     pub name: Option<String>,
 }
 
+/// Arguments for `create`.
+#[derive(Debug, Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "clap CLI flags are naturally bool-heavy"
+)]
+pub struct CreateArgs {
+    /// Natural-language description of what the skill should do.
+    pub description: String,
+    /// Creator agent to use (e.g. "claude-code" runs `claude -p <prompt>`).
+    #[arg(short = 'c', long = "creator")]
+    pub creator: Option<String>,
+    /// Explicit skill name (derived from description when omitted).
+    #[arg(short = 'n', long = "name")]
+    pub name: Option<String>,
+    /// Install for the current user (XDG global).
+    #[arg(short = 'g', long = "global", conflicts_with = "project")]
+    pub global: bool,
+    /// Install into the current project.
+    #[arg(short = 'p', long = "project", conflicts_with = "global")]
+    pub project: bool,
+    /// Use deep copies into agent dirs instead of symlinks.
+    #[arg(long = "copy")]
+    pub copy: bool,
+    /// Specific agents to wire up (repeatable).
+    #[arg(short = 'a', long = "agent")]
+    pub agents: Vec<String>,
+    /// Skip interactive prompts; assume yes.
+    #[arg(short = 'y', long = "yes")]
+    pub yes: bool,
+}
+
 /// Arguments for `config`.
 #[derive(Debug, Args)]
 pub struct ConfigArgs {
@@ -129,6 +163,7 @@ pub async fn run() -> Result<()> {
     let _ = crate::config::Config::load();
     match cli.command {
         Command::Add(a) => commands::add::run(a).await,
+        Command::Create(a) => commands::create::run(a).await,
         Command::List(a) => commands::list::run(a).await,
         Command::Find(a) => commands::find::run(a).await,
         Command::Remove(a) => commands::remove::run(a).await,
