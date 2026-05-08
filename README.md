@@ -154,6 +154,7 @@ $XDG_DATA_HOME/smartcrab-skills/
 
 ```json
 {
+  "$schema": "https://raw.githubusercontent.com/smartcrabai/skills/main/schemas/config.schema.json",
   "schema": 1,
   "store": {
     "global": "~/.local/share/smartcrab-skills/store",
@@ -168,6 +169,25 @@ $XDG_DATA_HOME/smartcrab-skills/
 ```
 
 Path expansion supports `~`, `$VAR`, and `${VAR:-default}`.
+
+### JSON Schema
+
+Both `config.json` and `skills.json` ship with JSON Schema definitions for editor auto-completion and validation:
+
+| File | Schema |
+|---|---|
+| `config.json` | [`schemas/config.schema.json`](schemas/config.schema.json) |
+| `skills.json` | [`schemas/skills.schema.json`](schemas/skills.schema.json) |
+
+Add the `$schema` key to your `config.json` to enable IDE support:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/smartcrabai/skills/main/schemas/config.schema.json",
+  "schema": 1,
+  ...
+}
+```
 
 ## Environment variables
 

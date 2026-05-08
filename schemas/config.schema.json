@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/smartcrabai/skills/main/schemas/config.schema.json",
+  "title": "skills config.json",
+  "description": "User configuration for the skills CLI ($XDG_CONFIG_HOME/smartcrab-skills/config.json)",
+  "type": "object",
+  "required": ["schema", "store", "default_agents", "agents"],
+  "properties": {
+    "schema": {
+      "type": "integer",
+      "const": 1,
+      "description": "Config format version. Always 1."
+    },
+    "store": {
+      "type": "object",
+      "required": ["global", "project"],
+      "properties": {
+        "global": {
+          "type": "string",
+          "description": "Path to the global skill store. Supports ~, $VAR, and ${VAR:-default} expansion.",
+          "default": "${XDG_DATA_HOME:-~/.local/share}/smartcrab-skills/store"
+        },
+        "project": {
+          "type": "string",
+          "description": "Path to the per-project skill store (relative to the project root if not absolute). Supports path expansion.",
+          "default": ".smartcrab-skills/store"
+        }
+      },
+      "additionalProperties": false
+    },
+    "default_agents": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Agent names used when --agent is not specified. Each entry must match an agents[].name.",
+      "default": ["claude-code"]
+    },
+    "agents": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/agent" },
+      "description": "Registry of known agents."
+    }
+  },
+  "$defs": {
+    "agent": {
+      "type": "object",
+      "required": ["name", "global_dir", "project_dir"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique agent identifier (e.g. \"claude-code\")."
+        },
+        "global_dir": {
+          "type": "string",
+          "description": "Directory where global skills are linked/copied for this agent. Supports path expansion."
+        },
+        "project_dir": {
+          "type": "string",
+          "description": "Directory where project-scoped skills are linked/copied for this agent. Supports path expansion."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
