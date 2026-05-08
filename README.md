@@ -4,8 +4,22 @@ A Rust port of [`vercel-labs/skills`](https://github.com/vercel-labs/skills) —
 
 ## Install
 
+Homebrew (macOS / Linux):
+
 ```bash
-cargo install --path .
+brew install smartcrabai/tap/skills
+```
+
+Shell installer (macOS / Linux):
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/smartcrabai/skills/releases/latest/download/skills-installer.sh | sh
+```
+
+From source:
+
+```bash
+cargo install --git https://github.com/smartcrabai/skills
 ```
 
 ## Quick start
