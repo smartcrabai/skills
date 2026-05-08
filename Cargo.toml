@@ -1,5 +1,5 @@
 [package]
-description = ""
+description = "CLI for installing and managing agent skills (SKILL.md collections) across local development tooling"
 edition = "2024"
 license = "MIT"
 name = "skills"
