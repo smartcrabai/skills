@@ -1,3 +1,4 @@
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -21,6 +22,15 @@ pub enum Scope {
 pub enum Method {
     Symlink,
     Copy,
+}
+
+impl fmt::Display for Method {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Method::Symlink => f.write_str("symlink"),
+            Method::Copy => f.write_str("copy"),
+        }
+    }
 }
 
 /// Persisted record of an installed skill.

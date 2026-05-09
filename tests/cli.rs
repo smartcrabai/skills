@@ -472,3 +472,139 @@ fn add_invalid_source_errors_before_network() -> TestResult {
     assert!(err.contains("invalid source"), "stderr: {err}");
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// create
+// ---------------------------------------------------------------------------
+
+#[test]
+fn create_missing_description_shows_usage_error() -> TestResult {
+    // Given: a fresh env
+    let env = Env::new()?;
+    // When: `create` is invoked without required description argument
+    let out = env.cmd().args(["create"]).output()?;
+    // Then: fails with usage error
+    assert!(!out.status.success());
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("usage") || err.contains("required"),
+        "stderr should mention usage: {err}"
+    );
+    assert!(
+        err.contains("DESCRIPTION") || err.contains("<DESCRIPTION>"),
+        "stderr should mention missing description: {err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn create_global_and_project_conflict_exits_with_error() -> TestResult {
+    // Given: a fresh env
+    let env = Env::new()?;
+    // When: both --global and --project are specified
+    let out = env
+        .cmd()
+        .args(["create", "test skill", "--global", "--project"])
+        .output()?;
+    // Then: clap rejects it
+    assert!(!out.status.success());
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("--global") && err.contains("--project"),
+        "conflict message: {err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn create_non_tty_without_scope_flag_errors() -> TestResult {
+    // Given: a non-interactive env
+    let env = Env::new()?;
+    // When: create without --global or --project, but with --yes
+    let out = env.cmd().args(["create", "test skill", "--yes"]).output()?;
+    // Then: errors asking for scope flag
+    assert!(!out.status.success());
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("--global") && err.contains("--project"),
+        "stderr should ask for a scope flag: {err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn create_with_unknown_agent_fails_before_creator_invocation() -> TestResult {
+    // Given: a fresh env
+    let env = Env::new()?;
+    // When: specifying an unknown agent
+    let out = env
+        .cmd()
+        .args([
+            "create",
+            "test skill",
+            "--global",
+            "--yes",
+            "--agent",
+            "no-such-agent",
+        ])
+        .output()?;
+    // Then: fails with unknown agent error (before invoking creator)
+    assert!(!out.status.success());
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("unknown agent"),
+        "stderr should report unknown agent: {err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn create_duplicate_skill_fails_before_creator_invocation() -> TestResult {
+    // Given: a registry with an existing skill named "dup-skill"
+    let env = Env::new()?;
+    let mut reg = Registry::default();
+    reg.add(global_skill("dup-skill", env.global_store("dup-skill")));
+    env.write_registry(&reg)?;
+    // When: trying to create a skill with the same explicit name
+    let out = env
+        .cmd()
+        .args([
+            "create",
+            "some description text",
+            "--global",
+            "--yes",
+            "--name",
+            "dup-skill",
+        ])
+        .output()?;
+    // Then: fails with duplicate error before invoking creator
+    assert!(!out.status.success());
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("already installed") || err.contains("dup-skill"),
+        "stderr should report duplicate: {err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn create_help_shows_flags() -> TestResult {
+    // Given: a fresh env
+    let env = Env::new()?;
+    // When: `skills create --help` is invoked
+    let out = env.cmd().args(["create", "--help"]).output()?;
+    // Then: help text includes expected flags
+    assert_ok(&out)?;
+    let body = stdout_of(&out);
+    for flag in [
+        "--creator",
+        "--name",
+        "--global",
+        "--project",
+        "--agent",
+        "--yes",
+    ] {
+        assert!(body.contains(flag), "help should mention {flag}: {body}");
+    }
+    Ok(())
+}

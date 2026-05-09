@@ -38,6 +38,9 @@ pub enum Error {
 
     #[error("network error: {0}")]
     Network(String),
+
+    #[error("creator failed: {0}")]
+    CreatorFailed(String),
 }
 
 /// Convenience alias.
