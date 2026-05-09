@@ -45,6 +45,9 @@ skills remove find-skills -g -y
 
 # Scaffold a new skill in ./my-skill/SKILL.md
 skills init my-skill
+
+# Generate a new skill from a natural-language description via an AI agent
+skills create "summarize PRs into release notes" -g -y
 ```
 
 ## Commands
@@ -57,6 +60,7 @@ skills init my-skill
 | `skills remove [skills...]` | Uninstall one or more skills |
 | `skills update [skills...]` | Re-fetch and relink skills from upstream |
 | `skills init [name]` | Scaffold a new `SKILL.md` template |
+| `skills create <description>` | Generate a new skill via an AI creator agent and install it |
 | `skills config <key> <op> [value...]` | Read or modify `config.json` |
 
 ### `add`
@@ -117,6 +121,24 @@ skills init [name]
 
 Writes a `SKILL.md` template with frontmatter and section scaffolding. With a name, creates `./<name>/SKILL.md`; without one, uses the basename of the cwd and writes `./SKILL.md`. Refuses to overwrite an existing file.
 
+### `create`
+
+```bash
+skills create <description> [-c|--creator <agent>] [-n|--name <name>] [-g|--global | -p|--project] [--copy] [-a <agent>]... [-y]
+```
+
+| Flag | Description |
+|---|---|
+| `-c`, `--creator <agent>` | Creator agent to invoke (defaults to `default_creator` in `config.json`, currently only `claude-code`) |
+| `-n`, `--name <name>` | Override the auto-generated kebab-case skill name |
+| `-g`, `--global` | Install to the user-global store |
+| `-p`, `--project` | Install into the current project |
+| `--copy` | Deep-copy into agent dirs instead of symlinks |
+| `-a`, `--agent <name>` | Specific agent to wire up (repeatable) |
+| `-y`, `--yes` | Skip interactive prompts |
+
+Spawns the creator agent (e.g. `claude -p <prompt>`) in a temp directory, expects it to emit a `SKILL.md`, and installs the result via the same pipeline as `add`. The skill is registered with `source: "local"` so it appears in `list`/`remove` like any other entry. Without `--name`, the description is slugified into a kebab-case name; duplicate names are rejected before the creator is invoked.
+
 ### `config`
 
 ```bash
@@ -161,6 +183,7 @@ $XDG_DATA_HOME/smartcrab-skills/
     "project": ".smartcrab-skills/store"
   },
   "default_agents": ["claude-code"],
+  "default_creator": "claude-code",
   "agents": [
     { "name": "claude-code", "global_dir": "~/.claude/skills", "project_dir": ".claude/skills" },
     { "name": "opencode",    "global_dir": "${XDG_CONFIG_HOME:-~/.config}/opencode/skills", "project_dir": ".agents/skills" }
