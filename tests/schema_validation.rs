@@ -184,7 +184,10 @@ fn skills_passes_with_only_required_fields() {
 #[test]
 fn config_rejects_missing_required_field() {
     let mut config = base_config();
-    config.as_object_mut().unwrap().remove("default_agents");
+    let Some(obj) = config.as_object_mut() else {
+        panic!("base_config returns object")
+    };
+    obj.remove("default_agents");
     assert_invalid(
         CONFIG_SCHEMA,
         &config,
