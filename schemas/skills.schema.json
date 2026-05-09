@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/smartcrabai/skills/main/schemas/skills.schema.json",
+  "title": "Skills Registry",
+  "description": "Registry of installed skills ($XDG_CONFIG_HOME/smartcrab-skills/skills.json). This file is managed by the skills CLI; do not edit by hand.",
+  "type": "object",
+  "required": ["version", "skills"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Skills registry format version. Always 1."
+    },
+    "skills": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/installedSkill" },
+      "description": "List of installed skills."
+    }
+  },
+  "$defs": {
+    "installedSkill": {
+      "type": "object",
+      "required": ["name", "source", "commit", "scope", "method", "agents", "store_path", "installed_at", "updated_at"],
+      "properties": {
+        "name":         { "type": "string", "description": "Unique skill name within the registry." },
+        "source":       { "type": "string", "description": "\"owner/repo/sub_path\" identifying the upstream GitHub location." },
+        "ref":          { "type": ["string", "null"], "description": "Branch, tag, or commit hash. null means the default branch was used." },
+        "commit":       { "type": "string", "description": "Full commit SHA resolved at install time." },
+        "scope":        { "type": "string", "enum": ["global", "project"], "description": "Whether the skill is installed globally or for a specific project." },
+        "project_path": { "type": ["string", "null"], "description": "Absolute path of the project root for project-scoped skills. null for global." },
+        "method":       { "type": "string", "enum": ["symlink", "copy"], "description": "How the skill files are deployed to the agent directory." },
+        "agents":       { "type": "array", "items": { "type": "string" }, "description": "Agent names this skill is deployed to." },
+        "store_path":   { "type": "string", "description": "Absolute path to the master copy in the store directory." },
+        "installed_at": { "type": "string", "format": "date-time", "description": "ISO 8601 timestamp of initial installation." },
+        "updated_at":   { "type": "string", "format": "date-time", "description": "ISO 8601 timestamp of last update." }
+      },
+      "additionalProperties": false
+    }
+  }
+}
