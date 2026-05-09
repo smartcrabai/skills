@@ -31,8 +31,21 @@ fn assert_valid(schema: &str, instance: &Value) {
 
 fn assert_invalid(schema: &str, instance: &Value, reason: &str) {
     let validator = compile_schema(schema);
-    let errors: Vec<_> = validator.iter_errors(instance).collect();
-    assert!(!errors.is_empty(), "{reason}");
+    assert!(!validator.is_valid(instance), "{reason}");
+}
+
+fn base_config() -> Value {
+    json!({
+        "schema": 1,
+        "store": {
+            "global": "~/.local/share/smartcrab-skills/store",
+            "project": ".smartcrab-skills/store"
+        },
+        "default_agents": ["claude-code"],
+        "agents": [
+            {"name": "claude-code", "global_dir": "~/.claude/skills", "project_dir": ".claude/skills"}
+        ]
+    })
 }
 
 #[test]
@@ -53,42 +66,45 @@ fn skills_schema_is_valid_json_schema() {
 
 #[test]
 fn valid_config_passes_validation() {
-    assert_valid(
-        CONFIG_SCHEMA,
-        &json!({
-            "schema": 1,
-            "store": {
-                "global": "~/.local/share/smartcrab-skills/store",
-                "project": ".smartcrab-skills/store"
-            },
-            "default_agents": ["claude-code"],
-            "agents": [
-                {
-                    "name": "claude-code",
-                    "global_dir": "~/.claude/skills",
-                    "project_dir": ".claude/skills"
-                }
-            ]
-        }),
-    );
+    assert_valid(CONFIG_SCHEMA, &base_config());
 }
 
 #[test]
 fn valid_config_with_multiple_agents_passes_validation() {
-    assert_valid(
+    let mut config = base_config();
+    config["store"]["global"] = json!("${XDG_DATA_HOME:-~/.local/share}/smartcrab-skills/store");
+    config["default_agents"] = json!(["claude-code", "opencode"]);
+    config["agents"] = json!([
+        {"name": "claude-code", "global_dir": "~/.claude/skills", "project_dir": ".claude/skills"},
+        {"name": "opencode", "global_dir": "${XDG_CONFIG_HOME:-~/.config}/opencode/skills", "project_dir": ".agents/skills"}
+    ]);
+    assert_valid(CONFIG_SCHEMA, &config);
+}
+
+#[test]
+fn valid_config_with_default_creator_passes_validation() {
+    let mut config = base_config();
+    config["default_creator"] = json!("claude-code");
+    assert_valid(CONFIG_SCHEMA, &config);
+}
+
+#[test]
+fn valid_config_with_schema_key_passes_validation() {
+    let mut config = base_config();
+    config["$schema"] = json!(
+        "https://raw.githubusercontent.com/smartcrabai/skills/main/schemas/config.schema.json"
+    );
+    assert_valid(CONFIG_SCHEMA, &config);
+}
+
+#[test]
+fn config_rejects_unknown_top_level_key() {
+    let mut config = base_config();
+    config["unknown_field"] = json!("should-be-rejected");
+    assert_invalid(
         CONFIG_SCHEMA,
-        &json!({
-            "schema": 1,
-            "store": {
-                "global": "${XDG_DATA_HOME:-~/.local/share}/smartcrab-skills/store",
-                "project": ".smartcrab-skills/store"
-            },
-            "default_agents": ["claude-code", "opencode"],
-            "agents": [
-                {"name": "claude-code", "global_dir": "~/.claude/skills", "project_dir": ".claude/skills"},
-                {"name": "opencode", "global_dir": "${XDG_CONFIG_HOME:-~/.config}/opencode/skills", "project_dir": ".agents/skills"}
-            ]
-        }),
+        &config,
+        "Config with unknown top-level key should produce validation errors",
     );
 }
 
@@ -167,93 +183,58 @@ fn skills_passes_with_only_required_fields() {
 
 #[test]
 fn config_rejects_missing_required_field() {
+    let mut config = base_config();
+    let Some(obj) = config.as_object_mut() else {
+        panic!("base_config returns object")
+    };
+    obj.remove("default_agents");
     assert_invalid(
         CONFIG_SCHEMA,
-        &json!({
-            "schema": 1,
-            "store": {
-                "global": "~/.local/share/smartcrab-skills/store",
-                "project": ".smartcrab-skills/store"
-            },
-            "agents": [
-                {"name": "claude-code", "global_dir": "~/.claude/skills", "project_dir": ".claude/skills"}
-            ]
-        }),
+        &config,
         "Config missing 'default_agents' should produce validation errors",
     );
 }
 
 #[test]
 fn config_rejects_wrong_schema_type() {
+    let mut config = base_config();
+    config["schema"] = json!("not-a-number");
     assert_invalid(
         CONFIG_SCHEMA,
-        &json!({
-            "schema": "not-a-number",
-            "store": {
-                "global": "~/.local/share/smartcrab-skills/store",
-                "project": ".smartcrab-skills/store"
-            },
-            "default_agents": ["claude-code"],
-            "agents": [
-                {"name": "claude-code", "global_dir": "~/.claude/skills", "project_dir": ".claude/skills"}
-            ]
-        }),
+        &config,
         "Config with string 'schema' field should produce validation errors",
     );
 }
 
 #[test]
 fn config_rejects_schema_const_violation() {
+    let mut config = base_config();
+    config["schema"] = json!(2);
     assert_invalid(
         CONFIG_SCHEMA,
-        &json!({
-            "schema": 2,
-            "store": {
-                "global": "~/.local/share/smartcrab-skills/store",
-                "project": ".smartcrab-skills/store"
-            },
-            "default_agents": ["claude-code"],
-            "agents": [
-                {"name": "claude-code", "global_dir": "~/.claude/skills", "project_dir": ".claude/skills"}
-            ]
-        }),
+        &config,
         "Config with schema != 1 should produce validation errors",
     );
 }
 
 #[test]
 fn config_rejects_agent_missing_required_field() {
+    let mut config = base_config();
+    config["agents"] = json!([{"name": "claude-code"}]);
     assert_invalid(
         CONFIG_SCHEMA,
-        &json!({
-            "schema": 1,
-            "store": {
-                "global": "~/.local/share/smartcrab-skills/store",
-                "project": ".smartcrab-skills/store"
-            },
-            "default_agents": ["claude-code"],
-            "agents": [
-                {"name": "claude-code"}
-            ]
-        }),
+        &config,
         "Agent missing 'global_dir' and 'project_dir' should produce validation errors",
     );
 }
 
 #[test]
 fn config_rejects_store_missing_required_field() {
+    let mut config = base_config();
+    config["store"] = json!({"global": "~/.local/share/smartcrab-skills/store"});
     assert_invalid(
         CONFIG_SCHEMA,
-        &json!({
-            "schema": 1,
-            "store": {
-                "global": "~/.local/share/smartcrab-skills/store"
-            },
-            "default_agents": ["claude-code"],
-            "agents": [
-                {"name": "claude-code", "global_dir": "~/.claude/skills", "project_dir": ".claude/skills"}
-            ]
-        }),
+        &config,
         "Store missing 'project' should produce validation errors",
     );
 }

@@ -34,12 +34,22 @@
       "description": "Agent names used when --agent is not specified. Each entry must match an agents[].name.",
       "default": ["claude-code"]
     },
+    "default_creator": {
+      "type": "string",
+      "description": "Agent name used by 'skills create'. Must match an agents[].name. Defaults to 'claude-code'.",
+      "default": "claude-code"
+    },
     "agents": {
       "type": "array",
       "items": { "$ref": "#/$defs/agent" },
       "description": "Registry of known agents."
+    },
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URI. Used by editors for autocompletion."
     }
   },
+  "additionalProperties": false,
   "$defs": {
     "agent": {
       "type": "object",
