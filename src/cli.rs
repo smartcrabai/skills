@@ -38,7 +38,8 @@ pub enum Command {
     reason = "clap CLI flags are naturally bool-heavy"
 )]
 pub struct AddArgs {
-    /// `owner/repo[/sub_path][#ref]`.
+    /// `owner/repo[/sub_path][#ref]`, a full GitHub/GitLab/git URL,
+    /// `git@host:owner/repo[.git]`, or a local path (`./dir`, `/abs/dir`).
     pub source: String,
     /// Install for the current user (XDG global).
     #[arg(short = 'g', long = "global", conflicts_with = "project")]

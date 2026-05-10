@@ -121,16 +121,13 @@ async fn update_one(
     Ok(())
 }
 
-/// Re-derive a `SkillSource` from the canonical `owner/repo[/sub_path]` form
-/// stored in the registry, attaching the saved `ref_` if any.
+/// Re-derive a `SkillSource` from the canonical form stored in the registry,
+/// attaching the saved `ref_` if any. The canonical form may be a GitHub
+/// shorthand, a full URL, or an absolute local path.
 fn source_from_installed(installed: &InstalledSkill) -> Result<SkillSource> {
-    let parsed = parse_source(&installed.source)?;
-    Ok(SkillSource {
-        owner: parsed.owner,
-        repo: parsed.repo,
-        sub_path: parsed.sub_path,
-        ref_: installed.ref_.clone(),
-    })
+    let mut parsed = parse_source(&installed.source)?;
+    parsed.set_ref(installed.ref_.clone());
+    Ok(parsed)
 }
 
 /// For global scope, union the existing agents with any newly-default agents

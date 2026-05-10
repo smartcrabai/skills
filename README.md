@@ -37,6 +37,16 @@ skills add vercel-labs/skills/skills/find-skills -g --copy
 # Pick a specific ref
 skills add vercel-labs/skills/skills/find-skills#main -g -y
 
+# Install from a full GitHub `tree` URL (ref + sub-path are extracted)
+skills add https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines -g -y
+
+# Install from any other host or via SSH
+skills add https://gitlab.com/org/repo -g -y
+skills add git@github.com:expo/skills.git -g -y
+
+# Install from a local directory containing SKILL.md
+skills add ./my-local-skill -g -y
+
 # List, search, refresh, remove
 skills list -g
 skills find slides
@@ -54,7 +64,7 @@ skills create "summarize PRs into release notes" -g -y
 
 | Command | Description |
 |---|---|
-| `skills add <source>` | Install a skill from a GitHub repo (`owner/repo[/sub_path][#ref]`) |
+| `skills add <source>` | Install a skill from a git repo or a local directory (see [`add`](#add) for the supported source formats) |
 | `skills list` | List installed skills as a table or JSON |
 | `skills find [query]` | Search the remote registry, falling back to the local one |
 | `skills remove [skills...]` | Uninstall one or more skills |
@@ -79,7 +89,20 @@ skills add <source> [-g|--global | -p|--project] [--copy] [-a <agent>]... [-y]
 | `-a`, `--agent <name>` | Specific agent to wire up (repeatable) |
 | `-y`, `--yes` | Skip interactive prompts |
 
-`<source>` accepts `owner/repo`, `owner/repo/sub_path`, or either form suffixed with `#ref` (branch, tag, or commit). Without `-g`/`-p` on a TTY, `add` prompts for the scope; in non-TTY mode one of the two flags is required. Without `-a` it falls back to `default_agents` from `config.json`.
+`<source>` accepts the following formats:
+
+| Format | Example |
+|---|---|
+| GitHub shorthand | `expo/skills` |
+| GitHub shorthand + sub-path | `vercel-labs/agent-skills/skills/web-design-guidelines` |
+| Any of the above with a ref | `vercel-labs/agent-skills#main` |
+| GitHub URL | `https://github.com/expo/skills` |
+| GitHub `tree` URL (extracts ref + sub-path) | `https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines` |
+| GitLab / any HTTPS git URL | `https://gitlab.com/org/repo` |
+| SSH git URL | `git@github.com:expo/skills.git` |
+| Local directory | `./my-local-skill`, `/abs/path/to/skill`, `~/skills/foo` |
+
+Local sources must point at a directory containing `SKILL.md` (the skill is copied into the master store; updates are picked up on `skills update`). Without `-g`/`-p` on a TTY, `add` prompts for the scope; in non-TTY mode one of the two flags is required. Without `-a` it falls back to `default_agents` from `config.json`.
 
 ### `list`
 

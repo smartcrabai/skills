@@ -473,6 +473,77 @@ fn add_invalid_source_errors_before_network() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn add_local_path_installs_into_master_and_registry() -> TestResult {
+    let env = Env::new()?;
+
+    // Build a local skill directory: <cwd>/my-local-skill/SKILL.md
+    let src_dir = env.cwd.path().join("my-local-skill");
+    fs::create_dir_all(&src_dir)?;
+    fs::write(
+        src_dir.join("SKILL.md"),
+        "---\nname: my-local-skill\ndescription: a local test skill\n---\n# my-local-skill\n",
+    )?;
+
+    let out = env
+        .cmd()
+        .args(["add", "./my-local-skill", "-g", "-y"])
+        .output()?;
+    assert_ok(&out)?;
+
+    // Master copy was created with the SKILL.md
+    let master = env.global_store("my-local-skill");
+    assert!(
+        master.is_dir(),
+        "master dir should exist: {}",
+        master.display()
+    );
+    assert!(master.join("SKILL.md").is_file());
+
+    // Registry contains the entry with the canonical absolute source.
+    let saved: serde_json::Value = serde_json::from_str(&fs::read_to_string(env.registry_path())?)?;
+    let skills = saved["skills"].as_array().ok_or("skills not array")?;
+    assert_eq!(skills.len(), 1, "registry: {skills:?}");
+    assert_eq!(skills[0]["name"], "my-local-skill");
+    let source = skills[0]["source"].as_str().ok_or("source not str")?;
+    assert!(
+        source.ends_with("my-local-skill"),
+        "source should end with skill dir: {source}"
+    );
+    assert!(
+        std::path::Path::new(source).is_absolute(),
+        "source should be an absolute path: {source}"
+    );
+
+    // The default `claude-code` agent gets a symlink in ~/.claude/skills.
+    let link = env.home.path().join(".claude/skills/my-local-skill");
+    assert!(
+        fs::symlink_metadata(&link).is_ok(),
+        "agent link should exist: {}",
+        link.display()
+    );
+    Ok(())
+}
+
+#[test]
+fn add_local_path_missing_skill_md_errors() -> TestResult {
+    let env = Env::new()?;
+    let src_dir = env.cwd.path().join("not-a-skill");
+    fs::create_dir_all(&src_dir)?;
+
+    let out = env
+        .cmd()
+        .args(["add", "./not-a-skill", "-g", "-y"])
+        .output()?;
+    assert!(!out.status.success());
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("SKILL.md not found"),
+        "stderr should mention missing SKILL.md: {err}"
+    );
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // create
 // ---------------------------------------------------------------------------

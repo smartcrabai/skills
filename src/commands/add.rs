@@ -61,7 +61,7 @@ pub async fn run(args: AddArgs) -> Result<()> {
     registry.add(InstalledSkill {
         name: skill_name.clone(),
         source: source.canonical(),
-        ref_: source.ref_.clone(),
+        ref_: source.ref_().map(str::to_string),
         commit: fetched.commit.clone(),
         scope,
         project_path: project_root.clone(),
@@ -168,7 +168,7 @@ fn print_summary(
 ) {
     println!("Installed skill: {skill_name}");
     println!("  source : {}", source.canonical());
-    if let Some(r) = &source.ref_ {
+    if let Some(r) = source.ref_() {
         println!("  ref    : {r}");
     }
     println!("  master : {}", master_path.display());
