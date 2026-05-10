@@ -53,6 +53,13 @@ pub struct AddArgs {
     /// Specific agents to wire up (repeatable).
     #[arg(short = 'a', long = "agent")]
     pub agents: Vec<String>,
+    /// Specific skill name(s) to install when the source contains multiple
+    /// `SKILL.md` files (repeatable).
+    #[arg(short = 's', long = "skill")]
+    pub skills: Vec<String>,
+    /// Install every skill discovered in the source.
+    #[arg(long = "all", conflicts_with = "skills")]
+    pub all: bool,
     /// Skip interactive prompts; assume yes.
     #[arg(short = 'y', long = "yes")]
     pub yes: bool,

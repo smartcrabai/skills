@@ -269,6 +269,17 @@ fn repo_basename_from_path(path: &str) -> String {
     last.trim_end_matches(".git").to_string()
 }
 
+/// Sub-path of the source within the cloned tree (or empty for a [`LocalSource`]).
+impl SkillSource {
+    #[must_use]
+    pub fn sub_path(&self) -> &Path {
+        match self {
+            SkillSource::Git(g) => &g.sub_path,
+            SkillSource::Local(_) => Path::new(""),
+        }
+    }
+}
+
 /// Result of fetching a skill into a working directory.
 ///
 /// Hold onto `tempdir` for the lifetime of any operations on `skill_dir` —
@@ -279,24 +290,59 @@ pub struct FetchedSkill {
     pub commit: String,
 }
 
-/// Fetch a skill: clone if remote, validate `SKILL.md`, capture HEAD commit.
+/// A repository (or local directory) that has been retrieved and is ready to
+/// be searched for `SKILL.md` files.
+pub struct FetchedRepo {
+    pub tempdir: TempDir,
+    /// Where to start searching: the cloned repo's working tree, or the local
+    /// directory the user pointed at.
+    pub root: PathBuf,
+    pub commit: String,
+}
+
+/// One `SKILL.md` discovered inside a [`FetchedRepo`].
+#[derive(Debug, Clone)]
+pub struct DiscoveredSkill {
+    /// Name from frontmatter, falling back to the directory basename.
+    pub name: String,
+    /// Path of the skill directory relative to [`FetchedRepo::root`]. Empty
+    /// when the skill lives at the root.
+    pub sub_path: PathBuf,
+    /// Absolute path to the skill directory inside the working tree.
+    pub abs_path: PathBuf,
+}
+
+/// Clone (or open) the source. Does not validate `SKILL.md` itself — call
+/// [`FetchedRepo::skill_at_subpath`] or [`FetchedRepo::discover_all`].
 ///
-/// For [`SkillSource::Local`], `skill_dir` points at the original local path
-/// (no copy), and `commit` is derived from `SKILL.md`'s mtime so reinstall
-/// detects edits.
+/// # Errors
+///
+/// Returns [`Error::GitClone`] or an underlying I/O error.
+pub async fn fetch_repo(source: &SkillSource) -> Result<FetchedRepo> {
+    match source {
+        SkillSource::Git(g) => fetch_repo_git(g),
+        SkillSource::Local(l) => fetch_repo_local(l),
+    }
+}
+
+/// Backwards-compatible single-skill fetch: clone, validate the pinpointed
+/// `SKILL.md`, capture commit.
 ///
 /// # Errors
 ///
 /// Returns [`Error::GitClone`], [`Error::SkillMdMissing`], or an underlying
 /// I/O error.
 pub async fn fetch(source: &SkillSource) -> Result<FetchedSkill> {
-    match source {
-        SkillSource::Git(g) => fetch_git(g),
-        SkillSource::Local(l) => fetch_local(l),
-    }
+    let repo = fetch_repo(source).await?;
+    let discovered = repo.skill_at_subpath(source.sub_path())?;
+    Ok(FetchedSkill {
+        tempdir: repo.tempdir,
+        skill_dir: discovered.abs_path,
+        commit: repo.commit,
+    })
 }
 
-fn fetch_git(source: &GitSource) -> Result<FetchedSkill> {
+fn fetch_repo_git(source: &GitSource) -> Result<FetchedRepo> {
     let tempdir = TempDir::new()?;
     let clone_dir = tempdir.path().join("repo");
 
@@ -317,52 +363,182 @@ fn fetch_git(source: &GitSource) -> Result<FetchedSkill> {
         )));
     }
 
-    let skill_dir = if source.sub_path.as_os_str().is_empty() {
-        clone_dir.clone()
-    } else {
-        clone_dir.join(&source.sub_path)
-    };
-    let skill_md = skill_dir.join("SKILL.md");
-    if !skill_md.is_file() {
-        return Err(Error::SkillMdMissing(skill_dir.display().to_string()));
-    }
-
     let commit = head_commit(&clone_dir)?;
-    Ok(FetchedSkill {
+    Ok(FetchedRepo {
         tempdir,
-        skill_dir,
+        root: clone_dir,
         commit,
     })
 }
 
-fn fetch_local(source: &LocalSource) -> Result<FetchedSkill> {
+fn fetch_repo_local(source: &LocalSource) -> Result<FetchedRepo> {
     if !source.path.is_dir() {
         return Err(Error::InvalidSource(format!(
             "local source no longer exists: {}",
             source.path.display()
         )));
     }
-    let skill_md = source.path.join("SKILL.md");
-    if !skill_md.is_file() {
-        return Err(Error::SkillMdMissing(source.path.display().to_string()));
-    }
-    let commit = local_commit(&skill_md)?;
+    // The "commit" is derived from the latest SKILL.md mtime under `path` so
+    // that `skills update` can detect edits. For collections this still works:
+    // any edit to any contained SKILL.md bumps the commit.
+    let commit = newest_skill_md_mtime(&source.path)?;
     let tempdir = TempDir::new()?;
-    Ok(FetchedSkill {
+    Ok(FetchedRepo {
         tempdir,
-        skill_dir: source.path.clone(),
+        root: source.path.clone(),
         commit,
     })
 }
 
-fn local_commit(skill_md: &Path) -> Result<String> {
-    let mtime = std::fs::metadata(skill_md)?
-        .modified()
-        .map_err(|e| Error::Io(std::io::Error::other(format!("mtime: {e}"))))?
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| Error::Io(std::io::Error::other(format!("mtime before epoch: {e}"))))?
-        .as_secs();
-    Ok(format!("local-{mtime}"))
+/// Directories the recursive walk should never descend into.
+const DISCOVERY_PRUNE_DIRS: &[&str] = &[
+    ".git",
+    ".github",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".next",
+    ".cache",
+];
+
+impl FetchedRepo {
+    /// Resolve the skill at exactly `sub` relative to [`Self::root`]. `sub`
+    /// may be empty to mean "the root itself".
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::SkillMdMissing`] if no `SKILL.md` exists at that path.
+    pub fn skill_at_subpath(&self, sub: &Path) -> Result<DiscoveredSkill> {
+        let abs = if sub.as_os_str().is_empty() {
+            self.root.clone()
+        } else {
+            self.root.join(sub)
+        };
+        let skill_md = abs.join("SKILL.md");
+        if !skill_md.is_file() {
+            return Err(Error::SkillMdMissing(abs.display().to_string()));
+        }
+        let name = read_skill_name(&skill_md).unwrap_or_else(|| dir_basename_or(&abs, "skill"));
+        Ok(DiscoveredSkill {
+            name,
+            sub_path: sub.to_path_buf(),
+            abs_path: abs,
+        })
+    }
+
+    /// Walk [`Self::root`] recursively and return every `SKILL.md` directory.
+    ///
+    /// Skips common build / VCS directories ([`DISCOVERY_PRUNE_DIRS`]) so
+    /// large repos stay fast.
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O errors from the directory walk.
+    pub fn discover_all(&self) -> Result<Vec<DiscoveredSkill>> {
+        let mut out = Vec::new();
+        let walker = walkdir::WalkDir::new(&self.root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| !is_pruned_dir(e));
+        for entry in walker {
+            let entry = entry.map_err(io_from_walkdir)?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if entry.file_name() != "SKILL.md" {
+                continue;
+            }
+            let skill_md = entry.path().to_path_buf();
+            let Some(dir) = skill_md.parent() else {
+                continue;
+            };
+            let sub_path = dir
+                .strip_prefix(&self.root)
+                .map(Path::to_path_buf)
+                .unwrap_or_default();
+            let name = read_skill_name(&skill_md).unwrap_or_else(|| dir_basename_or(dir, "skill"));
+            out.push(DiscoveredSkill {
+                name,
+                sub_path,
+                abs_path: dir.to_path_buf(),
+            });
+        }
+        // Stable order: by sub_path so output is reproducible.
+        out.sort_by(|a, b| a.sub_path.cmp(&b.sub_path));
+        Ok(out)
+    }
+}
+
+fn is_pruned_dir(entry: &walkdir::DirEntry) -> bool {
+    if !entry.file_type().is_dir() {
+        return false;
+    }
+    let name = entry.file_name();
+    DISCOVERY_PRUNE_DIRS.iter().any(|p| name == *p)
+}
+
+fn io_from_walkdir(e: walkdir::Error) -> Error {
+    Error::Io(
+        e.into_io_error()
+            .unwrap_or_else(|| std::io::Error::other("walkdir error")),
+    )
+}
+
+fn dir_basename_or(dir: &Path, fallback: &str) -> String {
+    dir.file_name()
+        .map_or_else(|| fallback.to_string(), |n| n.to_string_lossy().to_string())
+}
+
+/// Read the `name:` field from a `SKILL.md` frontmatter block. Returns `None`
+/// if the file is missing the block, the field is absent, or I/O fails.
+fn read_skill_name(skill_md: &Path) -> Option<String> {
+    let body = std::fs::read_to_string(skill_md).ok()?;
+    let mut lines = body.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            return None;
+        }
+        if let Some(rest) = trimmed.strip_prefix("name:") {
+            let value = rest.trim().trim_matches('"').trim_matches('\'');
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn newest_skill_md_mtime(root: &Path) -> Result<String> {
+    let mut newest: u64 = 0;
+    let walker = walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| !is_pruned_dir(e));
+    for entry in walker {
+        let entry = entry.map_err(io_from_walkdir)?;
+        if entry.file_type().is_file() && entry.file_name() == "SKILL.md" {
+            let mtime = std::fs::metadata(entry.path())?
+                .modified()
+                .map_err(|e| Error::Io(std::io::Error::other(format!("mtime: {e}"))))?
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| Error::Io(std::io::Error::other(format!("mtime before epoch: {e}"))))?
+                .as_secs();
+            if mtime > newest {
+                newest = mtime;
+            }
+        }
+    }
+    Ok(format!("local-{newest}"))
 }
 
 fn head_commit(repo_dir: &Path) -> Result<String> {

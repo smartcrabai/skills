@@ -544,6 +544,137 @@ fn add_local_path_missing_skill_md_errors() -> TestResult {
     Ok(())
 }
 
+/// Build a local "collection" directory with two SKILL.md files nested
+/// underneath, returning its absolute path. Mirrors the
+/// `expo/skills` shape (no SKILL.md at the root, real skills two levels down).
+fn make_local_collection(env: &Env) -> Result<PathBuf, Box<dyn StdError>> {
+    let root = env.cwd.path().join("collection");
+    let alpha = root.join("plugins/foo/skills/alpha");
+    let beta = root.join("plugins/foo/skills/beta");
+    fs::create_dir_all(&alpha)?;
+    fs::create_dir_all(&beta)?;
+    fs::write(
+        alpha.join("SKILL.md"),
+        "---\nname: alpha\ndescription: first\n---\n# alpha\n",
+    )?;
+    fs::write(
+        beta.join("SKILL.md"),
+        "---\nname: beta\ndescription: second\n---\n# beta\n",
+    )?;
+    Ok(root)
+}
+
+#[test]
+fn add_local_collection_without_select_lists_skills_and_errors() -> TestResult {
+    let env = Env::new()?;
+    make_local_collection(&env)?;
+
+    let out = env
+        .cmd()
+        .args(["add", "./collection", "-g", "-y"])
+        .output()?;
+    assert!(!out.status.success());
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("found 2 skills") && err.contains("--skill") && err.contains("--all"),
+        "stderr should explain how to disambiguate: {err}"
+    );
+    assert!(
+        err.contains("alpha") && err.contains("beta"),
+        "stderr should list discovered skill names: {err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn add_local_collection_with_skill_flag_picks_one() -> TestResult {
+    let env = Env::new()?;
+    make_local_collection(&env)?;
+
+    let out = env
+        .cmd()
+        .args(["add", "./collection", "-g", "--skill", "alpha", "-y"])
+        .output()?;
+    assert_ok(&out)?;
+    assert!(
+        env.global_store("alpha").is_dir(),
+        "alpha master should exist"
+    );
+    assert!(
+        !env.global_store("beta").exists(),
+        "beta should not have been installed"
+    );
+
+    let saved: serde_json::Value = serde_json::from_str(&fs::read_to_string(env.registry_path())?)?;
+    let skills = saved["skills"].as_array().ok_or("skills not array")?;
+    assert_eq!(skills.len(), 1, "{skills:?}");
+    assert_eq!(skills[0]["name"], "alpha");
+    let source = skills[0]["source"].as_str().ok_or("source not str")?;
+    assert!(
+        source.ends_with("plugins/foo/skills/alpha"),
+        "registered source should be the discovered skill path, got {source}"
+    );
+    Ok(())
+}
+
+#[test]
+fn add_local_collection_with_all_installs_every_skill() -> TestResult {
+    let env = Env::new()?;
+    make_local_collection(&env)?;
+
+    let out = env
+        .cmd()
+        .args(["add", "./collection", "-g", "--all", "-y"])
+        .output()?;
+    assert_ok(&out)?;
+    assert!(env.global_store("alpha").is_dir());
+    assert!(env.global_store("beta").is_dir());
+
+    let saved: serde_json::Value = serde_json::from_str(&fs::read_to_string(env.registry_path())?)?;
+    let skills = saved["skills"].as_array().ok_or("skills not array")?;
+    let names: std::collections::HashSet<_> =
+        skills.iter().filter_map(|s| s["name"].as_str()).collect();
+    assert!(
+        names.contains("alpha") && names.contains("beta"),
+        "{names:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn add_local_collection_unknown_skill_name_errors() -> TestResult {
+    let env = Env::new()?;
+    make_local_collection(&env)?;
+
+    let out = env
+        .cmd()
+        .args(["add", "./collection", "-g", "--skill", "no-such", "-y"])
+        .output()?;
+    assert!(!out.status.success());
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("no-such") && err.contains("not present"),
+        "stderr should explain that the requested skill isn't in the source: {err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn add_with_all_and_skill_flags_conflict() -> TestResult {
+    let env = Env::new()?;
+    let out = env
+        .cmd()
+        .args(["add", "owner/repo", "-g", "--all", "--skill", "x", "-y"])
+        .output()?;
+    assert!(!out.status.success(), "clap should reject the combo");
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("--all") && err.contains("--skill"),
+        "stderr should mention the conflict: {err}"
+    );
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // create
 // ---------------------------------------------------------------------------

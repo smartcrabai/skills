@@ -47,6 +47,12 @@ skills add git@github.com:expo/skills.git -g -y
 # Install from a local directory containing SKILL.md
 skills add ./my-local-skill -g -y
 
+# Install every skill from a collection repo
+skills add expo/skills --all -g -y
+
+# Install specific skills from a collection
+skills add expo/skills -s upgrading-expo -s expo-deployment -g -y
+
 # List, search, refresh, remove
 skills list -g
 skills find slides
@@ -78,7 +84,8 @@ skills create "summarize PRs into release notes" -g -y
 Installs a skill into the master store and wires it into one or more agents' skill directories.
 
 ```bash
-skills add <source> [-g|--global | -p|--project] [--copy] [-a <agent>]... [-y]
+skills add <source> [-g|--global | -p|--project] [--copy] [-a <agent>]...
+                    [-s <skill>]... [--all] [-y]
 ```
 
 | Flag | Description |
@@ -87,6 +94,8 @@ skills add <source> [-g|--global | -p|--project] [--copy] [-a <agent>]... [-y]
 | `-p`, `--project` | Install into the current project |
 | `--copy` | Deep-copy into agent dirs instead of symlinks |
 | `-a`, `--agent <name>` | Specific agent to wire up (repeatable) |
+| `-s`, `--skill <name>` | Specific skill to install when the source contains multiple `SKILL.md` files (repeatable) |
+| `--all` | Install every `SKILL.md` discovered in the source |
 | `-y`, `--yes` | Skip interactive prompts |
 
 `<source>` accepts the following formats:
@@ -102,7 +111,19 @@ skills add <source> [-g|--global | -p|--project] [--copy] [-a <agent>]... [-y]
 | SSH git URL | `git@github.com:expo/skills.git` |
 | Local directory | `./my-local-skill`, `/abs/path/to/skill`, `~/skills/foo` |
 
-Local sources must point at a directory containing `SKILL.md` (the skill is copied into the master store; updates are picked up on `skills update`). Without `-g`/`-p` on a TTY, `add` prompts for the scope; in non-TTY mode one of the two flags is required. Without `-a` it falls back to `default_agents` from `config.json`.
+If the source contains multiple `SKILL.md` files (i.e. a "collection" repo like `expo/skills`), `add` discovers them all and:
+
+- on a TTY without `--skill`/`--all`, opens a multi-select prompt
+- with `--all`, installs every discovered skill
+- with `-s/--skill <name>` (repeatable), installs just the matching ones (matched by the `name:` in each `SKILL.md` frontmatter, falling back to the directory basename)
+- on non-TTY without `--skill`/`--all`, errors out with the list of available skill names
+
+```bash
+skills add expo/skills --all -g -y
+skills add expo/skills -s upgrading-expo -s expo-deployment -g -y
+```
+
+Local sources may point at either a single skill directory or a collection containing nested skills; the same selection rules apply. Without `-g`/`-p` on a TTY, `add` prompts for the scope; in non-TTY mode one of the two flags is required. Without `-a` it falls back to `default_agents` from `config.json`.
 
 ### `list`
 

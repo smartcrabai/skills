@@ -63,6 +63,35 @@ pub fn multiselect_agents(all: &[String], defaults: &[String]) -> Result<Vec<Str
     Ok(picks.into_iter().map(|i| all[i].clone()).collect())
 }
 
+/// Multi-select skills from `names`. All entries pre-checked. Requires at
+/// least one selection.
+///
+/// # Errors
+///
+/// Returns [`Error::TtyRequired`] in non-interactive contexts; propagates I/O
+/// errors. Returns [`Error::ConfigError`] if the user picks zero items.
+pub fn multiselect_skills(names: &[String]) -> Result<Vec<usize>> {
+    if !is_tty() {
+        return Err(Error::TtyRequired);
+    }
+    let checked: Vec<bool> = vec![true; names.len()];
+    let picks = MultiSelect::with_theme(&ColorfulTheme::default())
+        .with_prompt(format!(
+            "Select which of the {} skill(s) to install",
+            names.len()
+        ))
+        .items(names)
+        .defaults(&checked)
+        .interact()
+        .map_err(io_err)?;
+    if picks.is_empty() {
+        return Err(Error::ConfigError(
+            "no skills selected; aborting".to_string(),
+        ));
+    }
+    Ok(picks)
+}
+
 /// Yes/no confirmation prompt.
 ///
 /// # Errors
