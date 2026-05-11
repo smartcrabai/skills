@@ -6,18 +6,30 @@ name = "skills"
 repository = "https://github.com/smartcrabai/skills"
 version = "0.1.5"
 
+# Config for 'dist'
 [workspace.metadata.dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
 cargo-dist-version = "0.31.0"
+# Allow manually edited release workflow (required for newer GitHub Actions versions)
+allow-dirty = ["ci"]
+# CI backends to support
 ci = "github"
+# Path that installers should place binaries in
 install-path = "CARGO_HOME"
+# The installers to generate for each app
 installers = ["shell", "homebrew"]
+# Publish jobs to run in CI
 publish-jobs = ["homebrew"]
+# A GitHub repo to push Homebrew formulas to
 tap = "smartcrabai/homebrew-tap"
+# Target platforms to build apps for (Rust target-triple syntax)
 targets = [
   "aarch64-apple-darwin",
-  "x86_64-unknown-linux-gnu",
   "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-gnu",
 ]
+# Whether to install an updater program
+install-updater = false
 
 [dependencies]
 anyhow = "1.0.102"
