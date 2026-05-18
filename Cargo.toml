@@ -4,7 +4,7 @@ edition = "2024"
 license = "MIT"
 name = "skills"
 repository = "https://github.com/smartcrabai/skills"
-version = "0.1.5"
+version = "0.1.6"
 
 # Config for 'dist'
 [workspace.metadata.dist]
