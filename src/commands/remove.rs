@@ -54,9 +54,17 @@ pub async fn run(args: RemoveArgs) -> Result<()> {
 
         let agent_dirs = resolve_agent_dirs(&cfg, &skill);
         uninstall_from_agents(&agent_dirs, &skill.name)?;
-        remove_master(&skill.store_path)?;
 
         registry.remove(&skill.name, skill.scope, skill.project_path.as_deref());
+
+        // Delete the master only when no other entry still references it.
+        let still_referenced = registry
+            .skills
+            .iter()
+            .any(|s| s.store_path == skill.store_path);
+        if !still_referenced {
+            remove_master(&skill.store_path)?;
+        }
     }
 
     registry.save()?;

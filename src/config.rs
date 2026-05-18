@@ -23,11 +23,13 @@ fn default_creator_str() -> String {
     DEFAULT_CREATOR.to_string()
 }
 
-/// Where master skill data lives on disk (one for global, one for project).
+/// Where master skill data lives on disk.
+///
+/// A single shared store covers both global and project-scoped installs so
+/// that the same skill across multiple projects deduplicates on disk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreConfig {
     pub global: String,
-    pub project: String,
 }
 
 impl Default for Config {
@@ -36,7 +38,6 @@ impl Default for Config {
             schema: 1,
             store: StoreConfig {
                 global: "${XDG_DATA_HOME:-~/.local/share}/smartcrab-skills/store".to_string(),
-                project: ".smartcrab-skills/store".to_string(),
             },
             default_creator: DEFAULT_CREATOR.to_string(),
             default_agents: vec![DEFAULT_CREATOR.to_string()],
@@ -87,17 +88,6 @@ impl Config {
     #[must_use]
     pub fn expand_global_store(&self) -> PathBuf {
         expand_path(&self.store.global)
-    }
-
-    /// Expand `store.project`, rooted at `project_root` if relative.
-    #[must_use]
-    pub fn expand_project_store(&self, project_root: &Path) -> PathBuf {
-        let expanded = expand_path(&self.store.project);
-        if expanded.is_absolute() {
-            expanded
-        } else {
-            project_root.join(expanded)
-        }
     }
 
     /// Find an agent by name.

@@ -45,10 +45,6 @@ pub async fn run(args: ConfigArgs) -> Result<()> {
             store_set(&mut cfg.store.global, &values)?;
             cfg.save()
         }
-        ("store.project", Some("set")) => {
-            store_set(&mut cfg.store.project, &values)?;
-            cfg.save()
-        }
         ("agents", Some("list")) => {
             list_agents(&cfg);
             Ok(())
@@ -135,7 +131,7 @@ fn default_agents_set(cfg: &mut Config, values: &[String]) -> Result<()> {
 }
 
 fn store_set(field: &mut String, values: &[String]) -> Result<()> {
-    let path = single_value(values, "store.<global|project> set <path>")?;
+    let path = single_value(values, "store.global set <path>")?;
     *field = path.to_string();
     println!("store path set to {path}");
     Ok(())

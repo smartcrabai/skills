@@ -35,10 +35,9 @@ pub async fn run(args: CreateArgs) -> Result<()> {
     };
 
     let mut registry = Registry::load()?;
-    if registry
-        .find(&skill_name, scope, project_root.as_deref())
-        .is_some()
-    {
+    // Masters are keyed by name across the whole registry, so any existing
+    // entry with this name — regardless of scope/project — is a conflict.
+    if registry.find_by_name(&skill_name).is_some() {
         return Err(Error::DuplicateSkill(skill_name));
     }
 
@@ -52,7 +51,7 @@ pub async fn run(args: CreateArgs) -> Result<()> {
     invoke_creator(bin, flag, &skill_name, &args.description, work_dir.path()).await?;
 
     let project_root_ref = project_root.as_deref();
-    let master_path = super::add::master_dir_for(&cfg, scope, project_root_ref).join(&skill_name);
+    let master_path = super::add::master_dir_for(&cfg).join(&skill_name);
     install_to_master(work_dir.path(), &master_path)?;
 
     let agent_dirs = super::add::resolve_agent_dirs(&cfg, &agents, scope, project_root_ref)?;

@@ -112,12 +112,22 @@ async fn update_one(
     let new_short = short_sha(&new_commit);
     println!("{name}: updated {old_short} -> {new_short}");
 
-    let entry = registry
-        .find_mut(name, scope, project_root)
-        .ok_or_else(|| Error::SkillNotFound(name.to_string()))?;
-    entry.commit = new_commit;
-    entry.updated_at = Utc::now();
-    entry.agents = new_agents;
+    // Sync commit/updated_at on every entry sharing this master (only the
+    // target's agents change, since callers can re-wire a single install).
+    let now = Utc::now();
+    for entry in &mut registry.skills {
+        if entry.store_path != installed.store_path {
+            continue;
+        }
+        entry.commit.clone_from(&new_commit);
+        entry.updated_at = now;
+        if entry.name == name
+            && entry.scope == scope
+            && entry.project_path.as_deref() == project_root
+        {
+            entry.agents.clone_from(&new_agents);
+        }
+    }
     Ok(())
 }
 

@@ -67,14 +67,7 @@ impl Env {
     fn global_store(&self, name: &str) -> PathBuf {
         self.data_home
             .path()
-            .join("smartcrab-skills/store/global")
-            .join(name)
-    }
-
-    fn project_store(&self, name: &str) -> PathBuf {
-        self.cwd
-            .path()
-            .join("smartcrab-skills/store/project")
+            .join("smartcrab-skills/store")
             .join(name)
     }
 
@@ -354,7 +347,7 @@ fn list_global_filter_excludes_project_skills() -> TestResult {
     reg.add(project_skill(
         "proj-only",
         env.cwd.path(),
-        env.project_store("proj-only"),
+        env.global_store("proj-only"),
     ));
     env.write_registry(&reg)?;
 
@@ -521,6 +514,120 @@ fn add_local_path_installs_into_master_and_registry() -> TestResult {
         fs::symlink_metadata(&link).is_ok(),
         "agent link should exist: {}",
         link.display()
+    );
+    Ok(())
+}
+
+#[test]
+fn add_same_local_skill_globally_then_project_shares_master() -> TestResult {
+    let env = Env::new()?;
+
+    // Local skill source on disk.
+    let src_dir = env.cwd.path().join("shared-skill");
+    fs::create_dir_all(&src_dir)?;
+    fs::write(
+        src_dir.join("SKILL.md"),
+        "---\nname: shared-skill\ndescription: shared\n---\n# shared-skill\n",
+    )?;
+
+    // Install globally, then again into the (same) project. Both must end up
+    // sharing the user-level master under $XDG_DATA_HOME/.../store/<name>.
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./shared-skill", "-g", "-y"])
+            .output()?,
+    )?;
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./shared-skill", "-p", "-y"])
+            .output()?,
+    )?;
+
+    let master = env.global_store("shared-skill");
+    assert!(
+        master.is_dir(),
+        "shared master should exist: {}",
+        master.display()
+    );
+    // No project-local master directory should have been created.
+    let legacy_project_store = env.cwd.path().join("smartcrab-skills/store");
+    assert!(
+        !legacy_project_store.exists(),
+        "project scope must not create a project-local store: {}",
+        legacy_project_store.display()
+    );
+
+    // Both registry entries point at the same shared store_path.
+    let saved: serde_json::Value = serde_json::from_str(&fs::read_to_string(env.registry_path())?)?;
+    let skills = saved["skills"].as_array().ok_or("skills not array")?;
+    assert_eq!(skills.len(), 2, "{skills:?}");
+    let store_paths: std::collections::HashSet<&str> = skills
+        .iter()
+        .filter_map(|s| s["store_path"].as_str())
+        .collect();
+    assert_eq!(
+        store_paths.len(),
+        1,
+        "both entries should share one master: {store_paths:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn add_same_name_different_source_is_rejected() -> TestResult {
+    let env = Env::new()?;
+
+    let a = env.cwd.path().join("a");
+    let b = env.cwd.path().join("b");
+    fs::create_dir_all(&a)?;
+    fs::create_dir_all(&b)?;
+    // Both directories carry SKILL.md frontmatter with the same `name:` but
+    // they live at different absolute paths, so they're different sources.
+    let body = "---\nname: same-name\ndescription: x\n---\n# same-name\n";
+    fs::write(a.join("SKILL.md"), body)?;
+    fs::write(b.join("SKILL.md"), body)?;
+
+    assert_ok(&env.cmd().args(["add", "./a", "-g", "-y"]).output()?)?;
+
+    let out = env.cmd().args(["add", "./b", "-p", "-y"]).output()?;
+    assert!(!out.status.success(), "second add must be rejected");
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("already installed") && err.contains("same-name"),
+        "stderr should explain the master conflict: {err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn remove_one_sharer_keeps_master_for_others() -> TestResult {
+    let env = Env::new()?;
+
+    let src_dir = env.cwd.path().join("shared");
+    fs::create_dir_all(&src_dir)?;
+    fs::write(
+        src_dir.join("SKILL.md"),
+        "---\nname: shared\ndescription: x\n---\n# shared\n",
+    )?;
+
+    assert_ok(&env.cmd().args(["add", "./shared", "-g", "-y"]).output()?)?;
+    assert_ok(&env.cmd().args(["add", "./shared", "-p", "-y"]).output()?)?;
+
+    let master = env.global_store("shared");
+    assert!(master.is_dir());
+
+    // Remove the global entry; the project entry still references the master.
+    assert_ok(&env.cmd().args(["remove", "shared", "-g", "-y"]).output()?)?;
+    assert!(
+        master.is_dir(),
+        "master must survive while another entry references it"
+    );
+
+    // Removing the last entry should clean the master up.
+    assert_ok(&env.cmd().args(["remove", "shared", "-p", "-y"]).output()?)?;
+    assert!(
+        !master.exists(),
+        "master should be deleted once unreferenced"
     );
     Ok(())
 }
