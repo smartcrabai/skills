@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/smartcrabai/skills/main/schemas/skills-lock.schema.json",
+  "title": "Skills Lockfile",
+  "description": "Project-local lockfile (./skills-lock.json). Records project-scoped installs so `skills install` can reproduce them on a fresh checkout. Upper-compatible with vercel-labs/skills' skills-lock.json: same top-level shape and field names, plus optional `commit` and `agents`.",
+  "type": "object",
+  "required": ["version", "skills"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Lockfile format version. Always 1."
+    },
+    "skills": {
+      "type": "object",
+      "description": "Map of skill name to lock entry.",
+      "additionalProperties": { "$ref": "#/$defs/lockEntry" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "lockEntry": {
+      "type": "object",
+      "required": ["source", "sourceType", "agents"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Round-trippable source string: owner/repo[/sub_path] for GitHub, full URL for other git remotes, or absolute path for local sources."
+        },
+        "ref": {
+          "type": ["string", "null"],
+          "description": "Branch, tag, or commit hash. Omitted/null means the default branch was used."
+        },
+        "sourceType": {
+          "type": "string",
+          "enum": ["github", "git", "local"],
+          "description": "How `source` should be resolved at install time."
+        },
+        "commit": {
+          "type": ["string", "null"],
+          "description": "Full commit SHA resolved at install time (null for local sources)."
+        },
+        "agents": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Agent names this skill is wired into."
+        },
+        "computedHash": {
+          "type": ["string", "null"],
+          "description": "Reserved for future content-addressed verification. Currently unused by the Rust port."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -29,6 +29,9 @@ pub enum Command {
     Init(InitArgs),
     /// Read or modify configuration.
     Config(ConfigArgs),
+    /// Restore project-scoped skills from `./skills-lock.json`.
+    #[command(alias = "i")]
+    Install(InstallArgs),
 }
 
 /// Arguments for `add`.
@@ -147,6 +150,17 @@ pub struct CreateArgs {
     pub yes: bool,
 }
 
+/// Arguments for `install`.
+#[derive(Debug, Args)]
+pub struct InstallArgs {
+    /// Use deep copies into agent dirs instead of symlinks.
+    #[arg(long = "copy")]
+    pub copy: bool,
+    /// Skip interactive prompts; assume yes (currently always implied).
+    #[arg(short = 'y', long = "yes")]
+    pub yes: bool,
+}
+
 /// Arguments for `config`.
 #[derive(Debug, Args)]
 pub struct ConfigArgs {
@@ -178,5 +192,6 @@ pub async fn run() -> Result<()> {
         Command::Update(a) => commands::update::run(a).await,
         Command::Init(a) => commands::init::run(a).await,
         Command::Config(a) => commands::config::run(a).await,
+        Command::Install(a) => commands::install::run(a).await,
     }
 }

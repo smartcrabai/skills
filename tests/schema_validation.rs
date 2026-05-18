@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 
 const CONFIG_SCHEMA: &str = "config.schema.json";
 const SKILLS_SCHEMA: &str = "skills.schema.json";
+const SKILLS_LOCK_SCHEMA: &str = "skills-lock.schema.json";
 
 fn schemas_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schemas")
@@ -318,5 +319,107 @@ fn skills_rejects_wrong_version_type() {
             "skills": []
         }),
         "Skills with string 'version' should produce validation errors",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// skills-lock.schema.json
+// ---------------------------------------------------------------------------
+
+#[test]
+fn skills_lock_schema_is_valid_json_schema() {
+    let schema = load_schema(SKILLS_LOCK_SCHEMA);
+    jsonschema::meta::validate(&schema).unwrap_or_else(|e| {
+        panic!("{SKILLS_LOCK_SCHEMA} is not a valid JSON Schema: {e}");
+    });
+}
+
+#[test]
+fn valid_lock_passes_validation() {
+    assert_valid(
+        SKILLS_LOCK_SCHEMA,
+        &json!({
+            "version": 1,
+            "skills": {
+                "from-github": {
+                    "source": "owner/repo/sub",
+                    "ref": "main",
+                    "sourceType": "github",
+                    "commit": "abc123def456789012345678901234567890abcd",
+                    "agents": ["claude-code"]
+                },
+                "from-git": {
+                    "source": "git@example.com:org/repo.git",
+                    "ref": null,
+                    "sourceType": "git",
+                    "commit": "fedcba9876543210fedcba9876543210fedcba98",
+                    "agents": ["claude-code", "opencode"]
+                },
+                "from-local": {
+                    "source": "/abs/path/to/skill",
+                    "sourceType": "local",
+                    "commit": null,
+                    "agents": ["claude-code"]
+                }
+            }
+        }),
+    );
+}
+
+#[test]
+fn empty_lock_skills_map_passes_validation() {
+    assert_valid(SKILLS_LOCK_SCHEMA, &json!({ "version": 1, "skills": {} }));
+}
+
+#[test]
+fn lock_rejects_missing_version() {
+    assert_invalid(
+        SKILLS_LOCK_SCHEMA,
+        &json!({ "skills": {} }),
+        "Lock missing 'version' should produce validation errors",
+    );
+}
+
+#[test]
+fn lock_rejects_unknown_source_type() {
+    assert_invalid(
+        SKILLS_LOCK_SCHEMA,
+        &json!({
+            "version": 1,
+            "skills": {
+                "x": {
+                    "source": "owner/repo",
+                    "sourceType": "npm",
+                    "agents": []
+                }
+            }
+        }),
+        "Lock with sourceType='npm' should produce validation errors",
+    );
+}
+
+#[test]
+fn lock_rejects_entry_missing_required_field() {
+    assert_invalid(
+        SKILLS_LOCK_SCHEMA,
+        &json!({
+            "version": 1,
+            "skills": {
+                "x": {
+                    "sourceType": "github",
+                    "agents": []
+                }
+            }
+        }),
+        "Lock entry missing 'source' should produce validation errors",
+    );
+}
+
+#[test]
+fn lock_rejects_wrong_version_value() {
+    assert_invalid(
+        SKILLS_LOCK_SCHEMA,
+        &json!({ "version": 2, "skills": {} }),
+        "Lock with version != 1 should produce validation errors",
     );
 }

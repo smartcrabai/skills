@@ -81,6 +81,30 @@ impl SkillSource {
             g.ref_ = r;
         }
     }
+
+    /// Source-type discriminator used by `skills-lock.json`.
+    #[must_use]
+    pub fn source_type(&self) -> &'static str {
+        match self {
+            SkillSource::Local(_) => "local",
+            SkillSource::Git(g) if g.is_github() => "github",
+            SkillSource::Git(_) => "git",
+        }
+    }
+}
+
+impl GitSource {
+    /// `owner/repo` (no `.git` suffix) when the clone URL is GitHub HTTPS.
+    #[must_use]
+    pub fn github_owner_repo(&self) -> Option<String> {
+        let inner = self.clone_url.strip_prefix("https://github.com/")?;
+        Some(inner.trim_end_matches(".git").to_string())
+    }
+
+    #[must_use]
+    pub fn is_github(&self) -> bool {
+        self.clone_url.starts_with("https://github.com/")
+    }
 }
 
 /// Parse a user-supplied source string.
