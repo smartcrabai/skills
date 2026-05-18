@@ -10,6 +10,7 @@ use crate::github::{
     DiscoveredSkill, FetchedRepo, GitSource, SkillSource, fetch_repo, parse_source,
 };
 use crate::install::{install_to_master, link_into_agents};
+use crate::lock::{self, LockEntry, Lockfile};
 use crate::registry::{InstalledSkill, Method, Registry, Scope};
 use crate::ui;
 
@@ -78,7 +79,13 @@ pub async fn run(args: AddArgs) -> Result<()> {
     let agent_dirs = resolve_agent_dirs(&cfg, &agents, scope, project_root_ref)?;
     let master_root = master_dir_for(&cfg);
 
+    let source_type = source.source_type().to_string();
+    // Local sources expose a synthetic `local-<mtime>` "commit" only used by
+    // `update`; emitting it in the lockfile would surprise users.
+    let persist_commit = matches!(source, SkillSource::Git(_));
+
     let mut installed_summaries = Vec::with_capacity(selected.len());
+    let mut lock_entries: Vec<(String, LockEntry)> = Vec::with_capacity(selected.len());
     for (cand, (canonical, existing)) in selected.iter().zip(preflights) {
         let (master_path, commit) = if let Some(other) = existing {
             // Master already on disk for this name+source+ref — reuse it as-is
@@ -94,9 +101,9 @@ pub async fn run(args: AddArgs) -> Result<()> {
         let now = Utc::now();
         registry.add(InstalledSkill {
             name: cand.name.clone(),
-            source: canonical,
+            source: canonical.clone(),
             ref_: ref_str.clone(),
-            commit,
+            commit: commit.clone(),
             scope,
             project_path: project_root.clone(),
             method,
@@ -106,8 +113,25 @@ pub async fn run(args: AddArgs) -> Result<()> {
             updated_at: now,
         });
         installed_summaries.push((cand.name.clone(), master_path));
+        lock_entries.push((
+            cand.name.clone(),
+            LockEntry {
+                source: canonical,
+                ref_: ref_str.clone(),
+                source_type: source_type.clone(),
+                commit: persist_commit.then(|| commit.clone()),
+                agents: agents.clone(),
+            },
+        ));
     }
     registry.save()?;
+
+    if scope == Scope::Project
+        && let Some(root) = project_root.as_deref()
+        && let Err(e) = lock::merge_and_write(&Lockfile::path(root), lock_entries)
+    {
+        eprintln!("warning: failed to update skills-lock.json: {e}");
+    }
 
     print_summary(&source, &installed_summaries, &agents, &agent_dirs, method);
     Ok(())
@@ -197,7 +221,7 @@ fn canonical_for(source: &SkillSource, discovered: &DiscoveredSkill) -> Result<S
 }
 
 fn canonical_for_git(g: &GitSource, sub_path: &Path) -> Result<String> {
-    if let Some(owner_repo) = github_owner_repo(&g.clone_url) {
+    if let Some(owner_repo) = g.github_owner_repo() {
         if sub_path.as_os_str().is_empty() {
             return Ok(owner_repo);
         }
@@ -212,11 +236,6 @@ fn canonical_for_git(g: &GitSource, sub_path: &Path) -> Result<String> {
         sub_path.display(),
         g.canonical
     )))
-}
-
-fn github_owner_repo(clone_url: &str) -> Option<String> {
-    let inner = clone_url.strip_prefix("https://github.com/")?;
-    Some(inner.trim_end_matches(".git").to_string())
 }
 
 pub(crate) fn resolve_scope(global: bool, project: bool, yes: bool) -> Result<Scope> {

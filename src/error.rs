@@ -41,6 +41,9 @@ pub enum Error {
 
     #[error("creator failed: {0}")]
     CreatorFailed(String),
+
+    #[error("install: failed sources: {}", .0.join(", "))]
+    PartialInstallFailure(Vec<String>),
 }
 
 /// Convenience alias.

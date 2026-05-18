@@ -896,6 +896,240 @@ fn create_duplicate_skill_fails_before_creator_invocation() -> TestResult {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// install / lockfile
+// ---------------------------------------------------------------------------
+
+fn write_local_skill(dir: &Path, name: &str) -> TestResult {
+    fs::create_dir_all(dir)?;
+    fs::write(
+        dir.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: x\n---\n# {name}\n"),
+    )?;
+    Ok(())
+}
+
+#[test]
+fn install_without_lock_warns_and_exits_zero() -> TestResult {
+    let env = Env::new()?;
+    let out = env.cmd().arg("install").output()?;
+    assert_ok(&out)?;
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("skills-lock.json not found") && err.contains("nothing to install"),
+        "stderr should announce missing lock: {err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn install_with_empty_lock_warns_and_exits_zero() -> TestResult {
+    let env = Env::new()?;
+    let lock = env.cwd.path().join("skills-lock.json");
+    fs::write(&lock, br#"{"version":1,"skills":{}}"#)?;
+    let out = env.cmd().arg("install").output()?;
+    assert_ok(&out)?;
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("no entries"),
+        "stderr should mention empty lock: {err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn add_p_writes_skills_lock_with_expected_fields() -> TestResult {
+    let env = Env::new()?;
+    let src = env.cwd.path().join("my-skill");
+    write_local_skill(&src, "my-skill")?;
+
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./my-skill", "-p", "-a", "claude-code", "-y"])
+            .output()?,
+    )?;
+
+    let lock_path = env.cwd.path().join("skills-lock.json");
+    let lock: serde_json::Value = serde_json::from_str(&fs::read_to_string(&lock_path)?)?;
+    assert_eq!(lock["version"], 1);
+    let entry = &lock["skills"]["my-skill"];
+    assert_eq!(entry["sourceType"], "local");
+    assert!(
+        entry["source"]
+            .as_str()
+            .is_some_and(|s| s.ends_with("my-skill"))
+    );
+    assert!(
+        entry["commit"].is_null(),
+        "local sources should record null commit: {entry}"
+    );
+    let agents = entry["agents"].as_array().ok_or("agents not array")?;
+    assert!(agents.iter().any(|v| v == "claude-code"), "{agents:?}");
+    Ok(())
+}
+
+#[test]
+fn add_p_merges_lock_without_dropping_other_entries() -> TestResult {
+    let env = Env::new()?;
+
+    // Seed an existing lockfile with an unrelated entry the CLI shouldn't touch.
+    let lock_path = env.cwd.path().join("skills-lock.json");
+    fs::write(
+        &lock_path,
+        br#"{"version":1,"skills":{"old":{"source":"old/owner","sourceType":"github","agents":["claude-code"]}}}"#,
+    )?;
+
+    let src = env.cwd.path().join("new-skill");
+    write_local_skill(&src, "new-skill")?;
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./new-skill", "-p", "-a", "claude-code", "-y"])
+            .output()?,
+    )?;
+
+    let lock: serde_json::Value = serde_json::from_str(&fs::read_to_string(&lock_path)?)?;
+    let skills = lock["skills"].as_object().ok_or("skills not object")?;
+    assert!(skills.contains_key("old"), "preserved entry should remain");
+    assert!(skills.contains_key("new-skill"), "new entry should land");
+    Ok(())
+}
+
+#[test]
+fn add_g_does_not_write_skills_lock() -> TestResult {
+    let env = Env::new()?;
+    let src = env.cwd.path().join("only-global");
+    write_local_skill(&src, "only-global")?;
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./only-global", "-g", "-a", "claude-code", "-y"])
+            .output()?,
+    )?;
+    let lock_path = env.cwd.path().join("skills-lock.json");
+    assert!(
+        !lock_path.exists(),
+        "global add must not create a project lockfile"
+    );
+    Ok(())
+}
+
+#[test]
+fn install_restores_local_skill_from_lock() -> TestResult {
+    let env = Env::new()?;
+
+    // Project-scope `add -p` writes the lockfile.
+    let src = env.cwd.path().join("local-skill");
+    write_local_skill(&src, "local-skill")?;
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./local-skill", "-p", "-a", "claude-code", "-y"])
+            .output()?,
+    )?;
+    let lock_path = env.cwd.path().join("skills-lock.json");
+    assert!(lock_path.is_file(), "lock should exist after add -p");
+
+    // Wipe registry + master + agent link. Lock and source dir stay.
+    let registry = env.registry_path();
+    if registry.exists() {
+        fs::remove_file(&registry)?;
+    }
+    let master = env.global_store("local-skill");
+    if master.exists() {
+        fs::remove_dir_all(&master)?;
+    }
+    let agent_link = env.cwd.path().join(".claude/skills/local-skill");
+    if agent_link.exists() || fs::symlink_metadata(&agent_link).is_ok() {
+        fs::remove_file(&agent_link).ok();
+    }
+
+    // `install` re-creates the skill from the lock.
+    assert_ok(&env.cmd().arg("install").output()?)?;
+    assert!(master.is_dir(), "master should be re-created");
+    let saved: serde_json::Value = serde_json::from_str(&fs::read_to_string(&registry)?)?;
+    let skills = saved["skills"].as_array().ok_or("skills not array")?;
+    assert_eq!(skills.len(), 1, "{skills:?}");
+    assert_eq!(skills[0]["name"], "local-skill");
+    assert_eq!(skills[0]["scope"], "project");
+    Ok(())
+}
+
+#[test]
+fn install_is_idempotent_when_already_installed() -> TestResult {
+    let env = Env::new()?;
+    let src = env.cwd.path().join("idem-skill");
+    write_local_skill(&src, "idem-skill")?;
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./idem-skill", "-p", "-a", "claude-code", "-y"])
+            .output()?,
+    )?;
+    // Already installed: a second `install` should succeed and announce skip.
+    let out = env.cmd().arg("install").output()?;
+    assert_ok(&out)?;
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("skip (already installed)"),
+        "stderr should mention skip: {err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn install_continues_on_partial_failure() -> TestResult {
+    let env = Env::new()?;
+    let good = env.cwd.path().join("good-skill");
+    write_local_skill(&good, "good-skill")?;
+    let bad_path = env.cwd.path().join("does-not-exist-xyz");
+
+    // Hand-craft a lockfile that mixes a good local entry with a bogus one.
+    let lock_path = env.cwd.path().join("skills-lock.json");
+    let lock_body = serde_json::json!({
+        "version": 1,
+        "skills": {
+            "good-skill": {
+                "source": good.to_string_lossy(),
+                "sourceType": "local",
+                "agents": ["claude-code"]
+            },
+            "bad-skill": {
+                "source": bad_path.to_string_lossy(),
+                "sourceType": "local",
+                "agents": ["claude-code"]
+            }
+        }
+    });
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock_body)?)?;
+
+    let out = env.cmd().arg("install").output()?;
+    assert!(
+        !out.status.success(),
+        "install should report failure when any source fails"
+    );
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("install: failed"),
+        "stderr should report per-source failure: {err}"
+    );
+    // The good source still landed.
+    assert!(
+        env.global_store("good-skill").is_dir(),
+        "good skill should have been installed despite the partial failure"
+    );
+    Ok(())
+}
+
+#[test]
+fn install_alias_i_works() -> TestResult {
+    let env = Env::new()?;
+    let out = env.cmd().arg("i").output()?;
+    assert_ok(&out)?;
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("skills-lock.json not found"),
+        "alias `i` should reach the install handler: {err}"
+    );
+    Ok(())
+}
+
 #[test]
 fn create_help_shows_flags() -> TestResult {
     // Given: a fresh env

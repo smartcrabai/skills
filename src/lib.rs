@@ -9,5 +9,6 @@ pub mod config;
 pub mod error;
 pub mod github;
 pub mod install;
+pub mod lock;
 pub mod registry;
 pub mod ui;
