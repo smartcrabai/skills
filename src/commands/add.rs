@@ -48,29 +48,55 @@ pub async fn run(args: AddArgs) -> Result<()> {
     let selected = select_skills(candidates, &args)?;
 
     let mut registry = Registry::load()?;
-    // Pre-flight: refuse before doing any FS work if any selected name clashes.
+    let ref_str = source.ref_().map(str::to_string);
+    // Pre-flight: refuse before doing any FS work if any selected name clashes
+    // within the current scope, or already owns a shared master from a
+    // different source/ref. Cache the canonical source and any existing entry
+    // so the install loop below doesn't redo the work.
+    let mut preflights: Vec<(String, Option<InstalledSkill>)> = Vec::with_capacity(selected.len());
     for cand in &selected {
         if registry.find(&cand.name, scope, project_root_ref).is_some() {
             return Err(Error::DuplicateSkill(cand.name.clone()));
         }
+        let canonical = canonical_for(&source, cand)?;
+        let existing = registry.find_by_name(&cand.name).cloned();
+        if let Some(other) = &existing
+            && (other.source != canonical || other.ref_ != ref_str)
+        {
+            return Err(Error::DuplicateSkill(format!(
+                "{} already installed from {}{} (refusing to overwrite shared master with {}{})",
+                cand.name,
+                other.source,
+                ref_display(other.ref_.as_deref()),
+                canonical,
+                ref_display(ref_str.as_deref()),
+            )));
+        }
+        preflights.push((canonical, existing));
     }
 
     let agent_dirs = resolve_agent_dirs(&cfg, &agents, scope, project_root_ref)?;
-    let master_root = master_dir_for(&cfg, scope, project_root_ref);
+    let master_root = master_dir_for(&cfg);
 
     let mut installed_summaries = Vec::with_capacity(selected.len());
-    for cand in &selected {
-        let master_path = master_root.join(&cand.name);
-        install_to_master(&cand.abs_path, &master_path)?;
+    for (cand, (canonical, existing)) in selected.iter().zip(preflights) {
+        let (master_path, commit) = if let Some(other) = existing {
+            // Master already on disk for this name+source+ref — reuse it as-is
+            // so other sharers' contents stay in sync.
+            (other.store_path, other.commit)
+        } else {
+            let path = master_root.join(&cand.name);
+            install_to_master(&cand.abs_path, &path)?;
+            (path, repo.commit.clone())
+        };
         link_into_agents(&master_path, &agent_dirs, method)?;
 
-        let canonical = canonical_for(&source, cand)?;
         let now = Utc::now();
         registry.add(InstalledSkill {
             name: cand.name.clone(),
             source: canonical,
-            ref_: source.ref_().map(str::to_string),
-            commit: repo.commit.clone(),
+            ref_: ref_str.clone(),
+            commit,
             scope,
             project_path: project_root.clone(),
             method,
@@ -228,16 +254,14 @@ pub(crate) fn validate_agents(cfg: &Config, requested: &[String]) -> Result<()> 
     Ok(())
 }
 
-pub(crate) fn master_dir_for(cfg: &Config, scope: Scope, project_root: Option<&Path>) -> PathBuf {
-    let base = match scope {
-        Scope::Global => cfg.expand_global_store(),
-        Scope::Project => cfg.expand_project_store(project_root.unwrap_or_else(|| Path::new("."))),
-    };
-    let segment = match scope {
-        Scope::Global => "global",
-        Scope::Project => "project",
-    };
-    base.join(segment)
+/// Master store root for skill data. Always the user-level shared store so
+/// installs in different scopes/projects deduplicate on disk.
+pub(crate) fn master_dir_for(cfg: &Config) -> PathBuf {
+    cfg.expand_global_store()
+}
+
+fn ref_display(r: Option<&str>) -> String {
+    r.map_or_else(String::new, |s| format!("#{s}"))
 }
 
 pub(crate) fn resolve_agent_dirs(

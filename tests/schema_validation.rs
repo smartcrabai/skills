@@ -124,7 +124,7 @@ fn valid_skills_passes_validation() {
                     "project_path": null,
                     "method": "symlink",
                     "agents": ["claude-code", "opencode"],
-                    "store_path": "/home/user/.local/share/smartcrab-skills/store/global/example-skill",
+                    "store_path": "/home/user/.local/share/smartcrab-skills/store/example-skill",
                     "installed_at": "2024-01-15T10:30:00Z",
                     "updated_at": "2024-01-15T10:30:00Z"
                 }
@@ -149,7 +149,7 @@ fn valid_skills_with_project_scope_passes_validation() {
                     "project_path": "/home/user/projects/myapp",
                     "method": "copy",
                     "agents": ["claude-code"],
-                    "store_path": "/home/user/projects/myapp/.smartcrab-skills/store/project/project-skill",
+                    "store_path": "/home/user/.local/share/smartcrab-skills/store/project-skill",
                     "installed_at": "2024-06-01T12:00:00+09:00",
                     "updated_at": "2024-06-10T08:45:30.123456789Z"
                 }
@@ -231,12 +231,19 @@ fn config_rejects_agent_missing_required_field() {
 #[test]
 fn config_rejects_store_missing_required_field() {
     let mut config = base_config();
-    config["store"] = json!({"global": "~/.local/share/smartcrab-skills/store"});
+    config["store"] = json!({"project": ".smartcrab-skills/store"});
     assert_invalid(
         CONFIG_SCHEMA,
         &config,
-        "Store missing 'project' should produce validation errors",
+        "Store missing 'global' should produce validation errors",
     );
+}
+
+#[test]
+fn config_without_legacy_project_store_passes_validation() {
+    let mut config = base_config();
+    config["store"] = json!({"global": "~/.local/share/smartcrab-skills/store"});
+    assert_valid(CONFIG_SCHEMA, &config);
 }
 
 #[test]

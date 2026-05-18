@@ -13,17 +13,16 @@
     },
     "store": {
       "type": "object",
-      "required": ["global", "project"],
+      "required": ["global"],
       "properties": {
         "global": {
           "type": "string",
-          "description": "Path to the global skill store. Supports ~, $VAR, and ${VAR:-default} expansion.",
+          "description": "Path to the shared master store. Used for both global and project-scoped installs so the same skill can be reused across projects. Supports ~, $VAR, and ${VAR:-default} expansion.",
           "default": "${XDG_DATA_HOME:-~/.local/share}/smartcrab-skills/store"
         },
         "project": {
           "type": "string",
-          "description": "Path to the per-project skill store (relative to the project root if not absolute). Supports path expansion.",
-          "default": ".smartcrab-skills/store"
+          "description": "Deprecated: no longer consulted. Project-scoped installs now share the global master store. Retained only for backward-compatible parsing of older config files."
         }
       },
       "additionalProperties": false

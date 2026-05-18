@@ -196,8 +196,7 @@ skills config <key> <op> [value...]
 | `default_agents add <agent>` | Append an agent (must already be defined under `agents`) |
 | `default_agents remove <agent>` | Drop an agent from the defaults |
 | `default_agents set <a,b,c>` or `set <a> <b> <c>` | Replace the default list |
-| `store.global set <path>` | Override the global store path |
-| `store.project set <path>` | Override the per-project store path |
+| `store.global set <path>` | Override the shared master store path |
 | `agents list` | Render the agent table |
 | `agents add <name> <global_dir> <project_dir>` | Register a new agent |
 | `agents remove <name>` | Unregister; cascades to `default_agents` if present |
@@ -212,9 +211,10 @@ $XDG_CONFIG_HOME/smartcrab-skills/
 └── skills.json   # registry of installed skills
 $XDG_DATA_HOME/smartcrab-skills/
 └── store/
-    ├── global/<skill-name>/   # canonical master copy
-    └── project/<skill-name>/
+    └── <skill-name>/   # canonical master copy (shared across global + every project)
 ```
+
+Masters live at the user level even for project-scoped installs, so the same skill installed from multiple projects deduplicates on disk. Agent directories (e.g. `~/.claude/skills`, `<project>/.claude/skills`) still differ per scope — only the underlying master is shared.
 
 ### `config.json` example
 
@@ -223,8 +223,7 @@ $XDG_DATA_HOME/smartcrab-skills/
   "$schema": "https://raw.githubusercontent.com/smartcrabai/skills/main/schemas/config.schema.json",
   "schema": 1,
   "store": {
-    "global": "~/.local/share/smartcrab-skills/store",
-    "project": ".smartcrab-skills/store"
+    "global": "~/.local/share/smartcrab-skills/store"
   },
   "default_agents": ["claude-code"],
   "default_creator": "claude-code",

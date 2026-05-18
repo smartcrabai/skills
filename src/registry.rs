@@ -119,6 +119,13 @@ impl Registry {
         })
     }
 
+    /// Find any entry with this name, ignoring scope/project. Used to detect
+    /// shared-master collisions: the master directory is keyed by name alone.
+    #[must_use]
+    pub fn find_by_name(&self, name: &str) -> Option<&InstalledSkill> {
+        self.skills.iter().find(|s| s.name == name)
+    }
+
     /// Mutable variant of [`Self::find`].
     pub fn find_mut(
         &mut self,
