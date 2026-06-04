@@ -38,10 +38,10 @@ pub async fn run(args: AddArgs) -> Result<()> {
     }
     validate_agents(&cfg, &agents)?;
 
-    let method = if args.copy {
-        Method::Copy
-    } else {
+    let method = if args.symlink {
         Method::Symlink
+    } else {
+        Method::Copy
     };
 
     let repo = fetch_repo(&source).await?;
@@ -56,6 +56,7 @@ pub async fn run(args: AddArgs) -> Result<()> {
     // so the install loop below doesn't redo the work.
     let mut preflights: Vec<(String, Option<InstalledSkill>)> = Vec::with_capacity(selected.len());
     for cand in &selected {
+        validate_skill_name(&cand.name)?;
         if registry.find(&cand.name, scope, project_root_ref).is_some() {
             return Err(Error::DuplicateSkill(cand.name.clone()));
         }
@@ -236,6 +237,25 @@ fn canonical_for_git(g: &GitSource, sub_path: &Path) -> Result<String> {
         sub_path.display(),
         g.canonical
     )))
+}
+
+/// Reject skill names that would escape the store or agent dirs when joined
+/// into a path. Names come from untrusted `SKILL.md` frontmatter, so anything
+/// other than a single, plain path component is refused.
+pub(crate) fn validate_skill_name(name: &str) -> Result<()> {
+    let invalid = name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.starts_with('~')
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0');
+    if invalid {
+        return Err(Error::InvalidSource(format!(
+            "invalid skill name {name:?}: must be a single path component"
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) fn resolve_scope(global: bool, project: bool, yes: bool) -> Result<Scope> {

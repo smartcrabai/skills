@@ -33,6 +33,7 @@ pub async fn run(args: CreateArgs) -> Result<()> {
         Some(n) => n,
         None => slugify(&args.description)?,
     };
+    super::add::validate_skill_name(&skill_name)?;
 
     let mut registry = Registry::load()?;
     // Masters are keyed by name across the whole registry, so any existing
@@ -41,10 +42,10 @@ pub async fn run(args: CreateArgs) -> Result<()> {
         return Err(Error::DuplicateSkill(skill_name));
     }
 
-    let method = if args.copy {
-        Method::Copy
-    } else {
+    let method = if args.symlink {
         Method::Symlink
+    } else {
+        Method::Copy
     };
 
     let work_dir = tempfile::tempdir()?;

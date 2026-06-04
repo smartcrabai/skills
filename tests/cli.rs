@@ -508,11 +508,35 @@ fn add_local_path_installs_into_master_and_registry() -> TestResult {
         "source should be an absolute path: {source}"
     );
 
-    // The default `claude-code` agent gets a symlink in ~/.claude/skills.
+    // The default `claude-code` agent gets a deep copy in ~/.claude/skills
+    // (copy is the default method).
     let link = env.home.path().join(".claude/skills/my-local-skill");
+    let meta = fs::symlink_metadata(&link)?;
     assert!(
-        fs::symlink_metadata(&link).is_ok(),
-        "agent link should exist: {}",
+        meta.is_dir() && !meta.file_type().is_symlink(),
+        "agent entry should be a copied dir, not a symlink: {}",
+        link.display()
+    );
+    assert!(link.join("SKILL.md").is_file());
+    Ok(())
+}
+
+#[test]
+fn add_with_symlink_flag_links_instead_of_copying() -> TestResult {
+    let env = Env::new()?;
+    let src = env.cwd.path().join("linked-skill");
+    write_local_skill(&src, "linked-skill")?;
+
+    let out = env
+        .cmd()
+        .args(["add", "./linked-skill", "-g", "--symlink", "-y"])
+        .output()?;
+    assert_ok(&out)?;
+
+    let link = env.home.path().join(".claude/skills/linked-skill");
+    assert!(
+        fs::symlink_metadata(&link)?.file_type().is_symlink(),
+        "agent entry should be a symlink: {}",
         link.display()
     );
     Ok(())
@@ -909,6 +933,126 @@ fn write_local_skill(dir: &Path, name: &str) -> TestResult {
     Ok(())
 }
 
+/// Push a file's mtime into the future so the synthetic `local-<mtime>`
+/// commit of a local source is guaranteed to change.
+fn bump_mtime(path: &Path) -> TestResult {
+    let f = fs::File::options().write(true).open(path)?;
+    f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(10))?;
+    Ok(())
+}
+
+#[test]
+fn update_refreshes_copied_agent_dir() -> TestResult {
+    let env = Env::new()?;
+    let src = env.cwd.path().join("copy-skill");
+    write_local_skill(&src, "copy-skill")?;
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./copy-skill", "-g", "-a", "claude-code", "-y"])
+            .output()?,
+    )?;
+
+    // Mutate the source and bump SKILL.md's mtime so `update` sees a new
+    // synthetic commit.
+    fs::write(
+        src.join("SKILL.md"),
+        "---\nname: copy-skill\ndescription: v2\n---\n# v2\n",
+    )?;
+    bump_mtime(&src.join("SKILL.md"))?;
+
+    assert_ok(
+        &env.cmd()
+            .args(["update", "copy-skill", "-g", "-y"])
+            .output()?,
+    )?;
+
+    let agent_copy = env.home.path().join(".claude/skills/copy-skill/SKILL.md");
+    let body = fs::read_to_string(&agent_copy)?;
+    assert!(
+        body.contains("v2"),
+        "agent copy should be refreshed: {body}"
+    );
+    Ok(())
+}
+
+#[test]
+fn update_refreshes_copy_sharers_in_other_scopes() -> TestResult {
+    let env = Env::new()?;
+    let src = env.cwd.path().join("share-skill");
+    write_local_skill(&src, "share-skill")?;
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./share-skill", "-g", "-a", "claude-code", "-y"])
+            .output()?,
+    )?;
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./share-skill", "-p", "-a", "claude-code", "-y"])
+            .output()?,
+    )?;
+
+    fs::write(
+        src.join("SKILL.md"),
+        "---\nname: share-skill\ndescription: v2\n---\n# v2\n",
+    )?;
+    bump_mtime(&src.join("SKILL.md"))?;
+
+    // Updating the *global* entry must also refresh the project entry's deep
+    // copy: its commit gets synced alongside, so a stale copy would otherwise
+    // report "up-to-date" forever.
+    assert_ok(
+        &env.cmd()
+            .args(["update", "share-skill", "-g", "-y"])
+            .output()?,
+    )?;
+
+    let project_copy = env.cwd.path().join(".claude/skills/share-skill/SKILL.md");
+    let body = fs::read_to_string(&project_copy)?;
+    assert!(
+        body.contains("v2"),
+        "project copy should be refreshed: {body}"
+    );
+
+    // The project entry's commit must have been synced too, so a follow-up
+    // project-scope update is a clean no-op (not a stale "up-to-date" lie).
+    let out = env
+        .cmd()
+        .args(["update", "share-skill", "-p", "-y"])
+        .output()?;
+    assert_ok(&out)?;
+    assert!(
+        stdout_of(&out).contains("up-to-date"),
+        "second update should be a no-op: {}",
+        stdout_of(&out)
+    );
+    Ok(())
+}
+
+#[test]
+fn add_rejects_traversal_in_skill_name() -> TestResult {
+    let env = Env::new()?;
+    let src = env.cwd.path().join("evil-skill");
+    fs::create_dir_all(&src)?;
+    fs::write(
+        src.join("SKILL.md"),
+        "---\nname: ../../evil\ndescription: x\n---\n# evil\n",
+    )?;
+
+    let out = env
+        .cmd()
+        .args(["add", "./evil-skill", "-g", "-y"])
+        .output()?;
+    assert!(!out.status.success(), "traversal name must be rejected");
+    let err = stderr_of(&out);
+    assert!(err.contains("invalid skill name"), "stderr: {err}");
+    // Nothing may have escaped the store root.
+    assert!(
+        !env.data_home.path().join("evil").exists(),
+        "no content may be written outside the store"
+    );
+    Ok(())
+}
+
 #[test]
 fn install_without_lock_warns_and_exits_zero() -> TestResult {
     let env = Env::new()?;
@@ -1037,8 +1181,12 @@ fn install_restores_local_skill_from_lock() -> TestResult {
         fs::remove_dir_all(&master)?;
     }
     let agent_link = env.cwd.path().join(".claude/skills/local-skill");
-    if agent_link.exists() || fs::symlink_metadata(&agent_link).is_ok() {
-        fs::remove_file(&agent_link).ok();
+    if let Ok(meta) = fs::symlink_metadata(&agent_link) {
+        if meta.is_dir() {
+            fs::remove_dir_all(&agent_link)?;
+        } else {
+            fs::remove_file(&agent_link)?;
+        }
     }
 
     // `install` re-creates the skill from the lock.
