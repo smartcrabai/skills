@@ -50,32 +50,15 @@ pub async fn run(args: AddArgs) -> Result<()> {
 
     let mut registry = Registry::load()?;
     let ref_str = source.ref_().map(str::to_string);
-    // Pre-flight: refuse before doing any FS work if any selected name clashes
-    // within the current scope, or already owns a shared master from a
-    // different source/ref. Cache the canonical source and any existing entry
-    // so the install loop below doesn't redo the work.
-    let mut preflights: Vec<(String, Option<InstalledSkill>)> = Vec::with_capacity(selected.len());
-    for cand in &selected {
-        validate_skill_name(&cand.name)?;
-        if registry.find(&cand.name, scope, project_root_ref).is_some() {
-            return Err(Error::DuplicateSkill(cand.name.clone()));
-        }
-        let canonical = canonical_for(&source, cand)?;
-        let existing = registry.find_by_name(&cand.name).cloned();
-        if let Some(other) = &existing
-            && (other.source != canonical || other.ref_ != ref_str)
-        {
-            return Err(Error::DuplicateSkill(format!(
-                "{} already installed from {}{} (refusing to overwrite shared master with {}{})",
-                cand.name,
-                other.source,
-                ref_display(other.ref_.as_deref()),
-                canonical,
-                ref_display(ref_str.as_deref()),
-            )));
-        }
-        preflights.push((canonical, existing));
-    }
+    let preflights = preflight(
+        &cfg,
+        &registry,
+        &selected,
+        &source,
+        ref_str.as_deref(),
+        scope,
+        project_root_ref,
+    )?;
 
     let agent_dirs = resolve_agent_dirs(&cfg, &agents, scope, project_root_ref)?;
     let master_root = master_dir_for(&cfg);
@@ -88,18 +71,24 @@ pub async fn run(args: AddArgs) -> Result<()> {
     let mut installed_summaries = Vec::with_capacity(selected.len());
     let mut lock_entries: Vec<(String, LockEntry)> = Vec::with_capacity(selected.len());
     for (cand, (canonical, existing)) in selected.iter().zip(preflights) {
-        let (master_path, commit) = if let Some(other) = existing {
+        let (master_path, commit) = match existing {
             // Master already on disk for this name+source+ref — reuse it as-is
             // so other sharers' contents stay in sync.
-            (other.store_path, other.commit)
-        } else {
-            let path = master_root.join(&cand.name);
-            install_to_master(&cand.abs_path, &path)?;
-            (path, repo.commit.clone())
+            Some(other) if other.store_path.exists() => (other.store_path, other.commit),
+            // No prior entry, or its master was manually deleted — (re)build it.
+            _ => {
+                let path = master_root.join(&cand.name);
+                install_to_master(&cand.abs_path, &path)?;
+                resync_sharers(&mut registry, &cfg, &path, &repo.commit)?;
+                (path, repo.commit.clone())
+            }
         };
         link_into_agents(&master_path, &agent_dirs, method)?;
 
         let now = Utc::now();
+        // Drop any stale same-scope record before re-registering; pre-flight
+        // already refused if an intact install existed here.
+        registry.remove(&cand.name, scope, project_root_ref);
         registry.add(InstalledSkill {
             name: cand.name.clone(),
             source: canonical.clone(),
@@ -237,6 +226,119 @@ fn canonical_for_git(g: &GitSource, sub_path: &Path) -> Result<String> {
         sub_path.display(),
         g.canonical
     )))
+}
+
+/// Pre-flight: refuse before doing any FS work if any selected name clashes
+/// within the current scope, or already owns a shared master from a
+/// different source/ref. A same-scope entry whose files were manually
+/// deleted is stale, not a clash — the caller reinstalls over it. Returns
+/// the canonical source and any existing entry per candidate so the install
+/// loop doesn't redo the work.
+fn preflight(
+    cfg: &Config,
+    registry: &Registry,
+    selected: &[DiscoveredSkill],
+    source: &SkillSource,
+    ref_str: Option<&str>,
+    scope: Scope,
+    project_root: Option<&Path>,
+) -> Result<Vec<(String, Option<InstalledSkill>)>> {
+    let mut out = Vec::with_capacity(selected.len());
+    for cand in selected {
+        validate_skill_name(&cand.name)?;
+        if let Some(here) = registry.find(&cand.name, scope, project_root)
+            && install_intact(cfg, here)
+        {
+            return Err(Error::DuplicateSkill(cand.name.clone()));
+        }
+        let canonical = canonical_for(source, cand)?;
+        let existing = registry.find_by_name(&cand.name).cloned();
+        if let Some(other) = &existing
+            && (other.source != canonical || other.ref_.as_deref() != ref_str)
+        {
+            return Err(Error::DuplicateSkill(format!(
+                "{} already installed from {}{} (refusing to overwrite shared master with {}{})",
+                cand.name,
+                other.source,
+                ref_display(other.ref_.as_deref()),
+                canonical,
+                ref_display(ref_str),
+            )));
+        }
+        out.push((canonical, existing));
+    }
+    Ok(out)
+}
+
+/// A manually deleted master was just rebuilt from a fresh fetch. Entries in
+/// other scopes sharing it still record the old commit, and `Method::Copy`
+/// installs hold deep copies of the old content in their agent dirs.
+/// Re-materialize those copies and sync every sharer's commit so `update`
+/// keeps reporting accurately (mirrors `update`'s sharer handling).
+fn resync_sharers(
+    registry: &mut Registry,
+    cfg: &Config,
+    master: &Path,
+    commit: &str,
+) -> Result<()> {
+    let copy_sharers: Vec<(Scope, Option<PathBuf>, Vec<String>)> = registry
+        .skills
+        .iter()
+        .filter(|e| e.store_path == master && e.method == Method::Copy)
+        .map(|e| (e.scope, e.project_path.clone(), e.agents.clone()))
+        .collect();
+    for (scope, root, agents) in &copy_sharers {
+        // A sharer may still reference agents since removed from the config;
+        // skip those rather than fail the whole add.
+        let known: Vec<String> = agents
+            .iter()
+            .filter(|a| cfg.agent(a).is_some())
+            .cloned()
+            .collect();
+        let dirs = resolve_agent_dirs(cfg, &known, *scope, root.as_deref())?;
+        link_into_agents(master, &dirs, Method::Copy)?;
+    }
+    let now = Utc::now();
+    for entry in &mut registry.skills {
+        if entry.store_path == master {
+            entry.commit = commit.to_string();
+            entry.updated_at = now;
+        }
+    }
+    Ok(())
+}
+
+/// True when every on-disk artifact of `entry` (the shared master plus the
+/// skill's entry in each recorded agent dir) is still present. A manually
+/// deleted install reports false, letting `add` reinstall over the stale
+/// registry record instead of refusing as a duplicate.
+fn install_intact(cfg: &Config, entry: &InstalledSkill) -> bool {
+    if !entry.store_path.exists() {
+        return false;
+    }
+    entry.agents.iter().all(|name| {
+        // Agent removed from config since install — nothing left to check.
+        let Some(agent) = cfg.agent(name) else {
+            return true;
+        };
+        let dir = match entry.scope {
+            Scope::Global => expand_path(&agent.global_dir),
+            Scope::Project => {
+                let raw = expand_path(&agent.project_dir);
+                if raw.is_absolute() {
+                    raw
+                } else {
+                    entry
+                        .project_path
+                        .as_deref()
+                        .unwrap_or_else(|| Path::new("."))
+                        .join(raw)
+                }
+            }
+        };
+        let dest = dir.join(&entry.name);
+        dest.is_symlink() || dest.exists()
+    })
 }
 
 /// Reject skill names that would escape the store or agent dirs when joined

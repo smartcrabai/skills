@@ -624,6 +624,160 @@ fn add_same_name_different_source_is_rejected() -> TestResult {
 }
 
 #[test]
+fn add_duplicate_intact_install_is_rejected() -> TestResult {
+    let env = Env::new()?;
+    let src = env.cwd.path().join("dup-skill");
+    write_local_skill(&src, "dup-skill")?;
+
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./dup-skill", "-g", "-y"])
+            .output()?,
+    )?;
+
+    // Nothing was deleted — the second add must still refuse.
+    let out = env
+        .cmd()
+        .args(["add", "./dup-skill", "-g", "-y"])
+        .output()?;
+    assert!(!out.status.success(), "second add must be rejected");
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("already installed"),
+        "stderr should report duplicate: {err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn add_after_manual_agent_dir_delete_reinstalls() -> TestResult {
+    let env = Env::new()?;
+    let src = env.cwd.path().join("gone-skill");
+    write_local_skill(&src, "gone-skill")?;
+
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./gone-skill", "-g", "-y"])
+            .output()?,
+    )?;
+
+    // Simulate the user deleting the agent copy by hand; the master and the
+    // registry entry stay behind.
+    let agent_copy = env.home.path().join(".claude/skills/gone-skill");
+    fs::remove_dir_all(&agent_copy)?;
+
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./gone-skill", "-g", "-y"])
+            .output()?,
+    )?;
+    assert!(
+        agent_copy.join("SKILL.md").is_file(),
+        "agent copy should be restored: {}",
+        agent_copy.display()
+    );
+
+    // The stale record was replaced, not duplicated.
+    let saved: serde_json::Value = serde_json::from_str(&fs::read_to_string(env.registry_path())?)?;
+    let skills = saved["skills"].as_array().ok_or("skills not array")?;
+    assert_eq!(skills.len(), 1, "registry: {skills:?}");
+    Ok(())
+}
+
+#[test]
+fn add_after_manual_full_delete_rebuilds_master() -> TestResult {
+    let env = Env::new()?;
+    let src = env.cwd.path().join("wiped-skill");
+    write_local_skill(&src, "wiped-skill")?;
+
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./wiped-skill", "-g", "-y"])
+            .output()?,
+    )?;
+
+    // Simulate the user wiping both the agent copy and the shared master.
+    fs::remove_dir_all(env.home.path().join(".claude/skills/wiped-skill"))?;
+    let master = env.global_store("wiped-skill");
+    fs::remove_dir_all(&master)?;
+
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./wiped-skill", "-g", "-y"])
+            .output()?,
+    )?;
+    assert!(
+        master.join("SKILL.md").is_file(),
+        "master should be rebuilt: {}",
+        master.display()
+    );
+    assert!(
+        env.home
+            .path()
+            .join(".claude/skills/wiped-skill/SKILL.md")
+            .is_file(),
+        "agent copy should be restored"
+    );
+
+    let saved: serde_json::Value = serde_json::from_str(&fs::read_to_string(env.registry_path())?)?;
+    let skills = saved["skills"].as_array().ok_or("skills not array")?;
+    assert_eq!(skills.len(), 1, "registry: {skills:?}");
+    Ok(())
+}
+
+#[test]
+fn add_rebuilt_master_resyncs_sharing_entries() -> TestResult {
+    let env = Env::new()?;
+    let src = env.cwd.path().join("resync-skill");
+    write_local_skill(&src, "resync-skill")?;
+
+    // Two entries (global + project) share one master.
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./resync-skill", "-g", "-y"])
+            .output()?,
+    )?;
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./resync-skill", "-p", "-y"])
+            .output()?,
+    )?;
+
+    // Wipe the master and the global agent copy; bump the source mtime so the
+    // re-add observes a different synthetic commit.
+    fs::remove_dir_all(env.global_store("resync-skill"))?;
+    fs::remove_dir_all(env.home.path().join(".claude/skills/resync-skill"))?;
+    bump_mtime(&src.join("SKILL.md"))?;
+
+    assert_ok(
+        &env.cmd()
+            .args(["add", "./resync-skill", "-g", "-y"])
+            .output()?,
+    )?;
+
+    // Both sharers must record the same (new) commit, and the project's deep
+    // copy must have been re-materialized.
+    let saved: serde_json::Value = serde_json::from_str(&fs::read_to_string(env.registry_path())?)?;
+    let skills = saved["skills"].as_array().ok_or("skills not array")?;
+    assert_eq!(skills.len(), 2, "registry: {skills:?}");
+    let commits: std::collections::HashSet<&str> =
+        skills.iter().filter_map(|s| s["commit"].as_str()).collect();
+    assert_eq!(
+        commits.len(),
+        1,
+        "sharers should record the same commit: {commits:?}"
+    );
+    assert!(
+        env.cwd
+            .path()
+            .join(".claude/skills/resync-skill/SKILL.md")
+            .is_file(),
+        "project copy should be re-materialized"
+    );
+    Ok(())
+}
+
+#[test]
 fn remove_one_sharer_keeps_master_for_others() -> TestResult {
     let env = Env::new()?;
 
