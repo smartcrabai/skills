@@ -7,7 +7,7 @@ use crate::config::{Config, expand_path};
 use crate::error::{Error, Result};
 use crate::github::{SkillSource, fetch, parse_source};
 use crate::install::{install_to_master, link_into_agents};
-use crate::registry::{InstalledSkill, Registry, Scope};
+use crate::registry::{InstalledSkill, Method, Registry, Scope};
 use crate::ui;
 
 /// Implements the `update` flow: re-fetch each target, replace its master copy
@@ -111,6 +111,40 @@ async fn update_one(
     let old_short = short_sha(&installed.commit);
     let new_short = short_sha(&new_commit);
     println!("{name}: updated {old_short} -> {new_short}");
+
+    // Other entries sharing this master see the new content for free when
+    // symlinked, but `Method::Copy` installs hold stale deep copies in their
+    // agent dirs. Re-materialize those now, before their commit is synced
+    // below (after which `update` would report them up-to-date forever).
+    let copy_sharers: Vec<(Scope, Option<PathBuf>, Vec<String>)> = registry
+        .skills
+        .iter()
+        .filter(|e| {
+            e.store_path == installed.store_path
+                && e.method == Method::Copy
+                && !(e.name == name
+                    && e.scope == scope
+                    && e.project_path.as_deref() == project_root)
+        })
+        .map(|e| (e.scope, e.project_path.clone(), e.agents.clone()))
+        .collect();
+    for (sharer_scope, sharer_root, sharer_agents) in &copy_sharers {
+        // A sharer may still reference agents since removed from the config;
+        // skip those with a warning instead of failing the whole update.
+        let known: Vec<String> = sharer_agents
+            .iter()
+            .filter(|a| {
+                let ok = cfg.agent(a).is_some();
+                if !ok {
+                    eprintln!("warning: {name}: skipping unknown agent {a} on a sharing install");
+                }
+                ok
+            })
+            .cloned()
+            .collect();
+        let dirs = resolve_agent_dirs(cfg, &known, *sharer_scope, sharer_root.as_deref())?;
+        link_into_agents(&installed.store_path, &dirs, Method::Copy)?;
+    }
 
     // Sync commit/updated_at on every entry sharing this master (only the
     // target's agents change, since callers can re-wire a single install).

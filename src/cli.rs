@@ -50,9 +50,9 @@ pub struct AddArgs {
     /// Install into the current project.
     #[arg(short = 'p', long = "project", conflicts_with = "global")]
     pub project: bool,
-    /// Use deep copies into agent dirs instead of symlinks.
-    #[arg(long = "copy")]
-    pub copy: bool,
+    /// Symlink into agent dirs instead of deep copies (the default).
+    #[arg(long = "symlink")]
+    pub symlink: bool,
     /// Specific agents to wire up (repeatable).
     #[arg(short = 'a', long = "agent")]
     pub agents: Vec<String>,
@@ -139,9 +139,9 @@ pub struct CreateArgs {
     /// Install into the current project.
     #[arg(short = 'p', long = "project", conflicts_with = "global")]
     pub project: bool,
-    /// Use deep copies into agent dirs instead of symlinks.
-    #[arg(long = "copy")]
-    pub copy: bool,
+    /// Symlink into agent dirs instead of deep copies (the default).
+    #[arg(long = "symlink")]
+    pub symlink: bool,
     /// Specific agents to wire up (repeatable).
     #[arg(short = 'a', long = "agent")]
     pub agents: Vec<String>,
@@ -153,9 +153,9 @@ pub struct CreateArgs {
 /// Arguments for `install`.
 #[derive(Debug, Args)]
 pub struct InstallArgs {
-    /// Use deep copies into agent dirs instead of symlinks.
-    #[arg(long = "copy")]
-    pub copy: bool,
+    /// Symlink into agent dirs instead of deep copies (the default).
+    #[arg(long = "symlink")]
+    pub symlink: bool,
     /// Skip interactive prompts; assume yes (currently always implied).
     #[arg(short = 'y', long = "yes")]
     pub yes: bool,

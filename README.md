@@ -31,8 +31,8 @@ skills add vercel-labs/skills/skills/find-skills -g -y
 # Same, but for the current project
 skills add vercel-labs/skills/skills/find-skills -p -y
 
-# Use deep copies instead of symlinks
-skills add vercel-labs/skills/skills/find-skills -g --copy
+# Use symlinks instead of deep copies (copy is the default)
+skills add vercel-labs/skills/skills/find-skills -g --symlink
 
 # Pick a specific ref
 skills add vercel-labs/skills/skills/find-skills#main -g -y
@@ -84,7 +84,7 @@ skills create "summarize PRs into release notes" -g -y
 Installs a skill into the master store and wires it into one or more agents' skill directories.
 
 ```bash
-skills add <source> [-g|--global | -p|--project] [--copy] [-a <agent>]...
+skills add <source> [-g|--global | -p|--project] [--symlink] [-a <agent>]...
                     [-s <skill>]... [--all] [-y]
 ```
 
@@ -92,7 +92,7 @@ skills add <source> [-g|--global | -p|--project] [--copy] [-a <agent>]...
 |---|---|
 | `-g`, `--global` | Install to the user-global store |
 | `-p`, `--project` | Install into the current project |
-| `--copy` | Deep-copy into agent dirs instead of symlinks |
+| `--symlink` | Symlink into agent dirs instead of deep copies (deep copy is the default) |
 | `-a`, `--agent <name>` | Specific agent to wire up (repeatable) |
 | `-s`, `--skill <name>` | Specific skill to install when the source contains multiple `SKILL.md` files (repeatable) |
 | `--all` | Install every `SKILL.md` discovered in the source |
@@ -155,7 +155,7 @@ Without names, opens an interactive multiselect of installed skills (TTY only). 
 skills update [skills...] [-g|--global | -p|--project] [-y]
 ```
 
-Re-fetches each target from its recorded source/ref. If the upstream commit is unchanged it prints `up-to-date`; otherwise it overwrites the master copy and re-links agent dirs (preserving the original `Method`). For global skills, any newly-added entry in `default_agents` is also wired up.
+Re-fetches each target from its recorded source/ref. If the upstream commit is unchanged it prints `up-to-date`; otherwise it overwrites the master copy and re-links agent dirs (preserving the original `Method`, so deep-copied installs get fresh copies too). Other entries sharing the same master that were installed with the copy method also get their agent-dir copies refreshed. For global skills, any newly-added entry in `default_agents` is also wired up.
 
 ### `init`
 
@@ -168,7 +168,7 @@ Writes a `SKILL.md` template with frontmatter and section scaffolding. With a na
 ### `create`
 
 ```bash
-skills create <description> [-c|--creator <agent>] [-n|--name <name>] [-g|--global | -p|--project] [--copy] [-a <agent>]... [-y]
+skills create <description> [-c|--creator <agent>] [-n|--name <name>] [-g|--global | -p|--project] [--symlink] [-a <agent>]... [-y]
 ```
 
 | Flag | Description |
@@ -177,7 +177,7 @@ skills create <description> [-c|--creator <agent>] [-n|--name <name>] [-g|--glob
 | `-n`, `--name <name>` | Override the auto-generated kebab-case skill name |
 | `-g`, `--global` | Install to the user-global store |
 | `-p`, `--project` | Install into the current project |
-| `--copy` | Deep-copy into agent dirs instead of symlinks |
+| `--symlink` | Symlink into agent dirs instead of deep copies (deep copy is the default) |
 | `-a`, `--agent <name>` | Specific agent to wire up (repeatable) |
 | `-y`, `--yes` | Skip interactive prompts |
 

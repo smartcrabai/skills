@@ -38,7 +38,7 @@ pub async fn run(args: InstallArgs) -> Result<()> {
             source: source_str.clone(),
             global: false,
             project: true,
-            copy: args.copy,
+            symlink: args.symlink,
             agents: grp.agents,
             skills: grp.skill_names,
             all: false,
